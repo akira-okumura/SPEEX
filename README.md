@@ -1,2 +1,2 @@
-# SPEEX
-Single Photo-Electron EXtractor
+# SPEEX2
+Single Photo-Electron EXtractor 2
