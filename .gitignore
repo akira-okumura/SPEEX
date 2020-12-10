@@ -1,0 +1,4 @@
+*.so
+*.pcm
+*.d
+.DS_Store
