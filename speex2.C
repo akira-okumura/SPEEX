@@ -251,6 +251,7 @@ void SinglePEAnalyzer::Analyze() {
   fCanvas->cd(1);
   fSuminus0->SetFillColor(15);//Gray
   fSuminus0->SetTitle("fSignalH1(yellow), fNoiseH1(blue),fSuminus0(gray)");
+  fSuminus0->GetYaxis()->SetRangeUser(0.8,1000);
   fSuminus0->Draw();
   fNoiseH1->Draw("same");
   fSignalH1->Draw("same");
@@ -261,6 +262,7 @@ void SinglePEAnalyzer::Analyze() {
     Iterate();
     fCanvas->cd(i + 2);
     gPad->SetLogy(1);
+    fNPEDist.back()[0]->GetYaxis()->SetRangeUser(0.8,1000);
     fNPEDist.back()[0]->Draw();//1PEを作る為の、fSuminus0から前のiterationの2PE,3PE分布を除いたものが表示
     fNPEDist.back()[1]->Draw("same");//1PE分布
     fNPEDist.back()[2]->Draw("same");//2PE分布
