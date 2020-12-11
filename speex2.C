@@ -264,9 +264,7 @@ void SinglePEAnalyzer::Analyze() {
     gPad->SetLogy(1);
     fNPEDist.back()[0]->GetYaxis()->SetRangeUser(0.8,1000);
     fNPEDist.back()[0]->Draw();//1PEを作る為の、fSuminus0から前のiterationの2PE,3PE分布を除いたものが表示
-    fNPEDist.back()[1]->Draw("same");//1PE分布
-    fNPEDist.back()[2]->Draw("same");//2PE分布
-    fNPEDist.back()[3]->Draw("same");//3PE分布
+    for (int npe = 1; npe <= kMaxPE; ++npe) fNPEDist.back()[npe]->Draw("same");//NPE分布
     fSignalH1->SetLineColor(6);
     fSignalH1->Draw("same");
   }
@@ -307,10 +305,10 @@ void SinglePEAnalyzer::Iterate() {
   h0->Add(fSuminus0.get());
 
   if (n != 0) {
-    auto prev2PE = fNPEDist[n - 1][2].get();
-    auto prev3PE = fNPEDist[n - 1][3].get();
-    h0->Add(prev2PE, -1);
-    h0->Add(prev3PE, -1);
+    for (int npe=2; npe<=kMaxPE; ++npe){
+      auto prevNPE = fNPEDist[n - 1][npe].get();
+      h0->Add(prevNPE, -1);
+    }
     for (int i = 1; i <= h0->GetNbinsX(); ++i) {
       if (h0->GetBinContent(i) < 0) h0->SetBinContent(i, 0);
       // bin which content is negative value will be 0 content
@@ -338,73 +336,56 @@ void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
 
 void SinglePEAnalyzer::MakeNPEdistFast() {
   // TODO: implement me
-  // 12/10　ishida implemented you
+  // 12/11　ishida implemented you
   
-  auto h0 = fNPEDist.back()[0];
-  auto h1 = fNPEDist.back()[1];
-  auto h2 = fNPEDist.back()[2];
-  auto h3 = fNPEDist.back()[3];
+  std::vector<std::shared_ptr<TH1D>> h{};
+  for (int i=0; i<=kMaxPE; ++i) h.push_back(fNPEDist.back()[i]);
+ 
+  int nbins = h[1]->GetNbinsX();
+  int bin0 = h[1]->FindBin(0);
 
-  int nbins = h1->GetNbinsX();
-  int bin0 = h1->FindBin(0);
-
-  // 2PE
-  for (int ibin = 1; ibin <= nbins; ++ibin) {
-    int i = ibin - bin0;
-    double n2i = 0;
-    for (int jbin = 1; jbin <= nbins; ++jbin) {  // i' = j
-      int j = jbin - bin0;
-      double n1j = h1->GetBinContent(jbin);
-      int i_jbin = i - j + bin0;
-      double n1i_j =
-          (1 <= i_jbin && i_jbin <= nbins) ? h1->GetBinContent(i_jbin) : 0;
-      n2i += (n1j * n1i_j) / (2 * fN0); // Eq. (11)
-    }
-    h2->SetBinContent(ibin, n2i);
-  }
-  // 3PE
+  for (int npe =2; npe<=kMaxPE; ++npe) {
     for (int ibin = 1; ibin <= nbins; ++ibin) {
-    int i = ibin - bin0;
-    double n2i = 0;
-    for (int jbin = 1; jbin <= nbins; ++jbin) {  // i' = j
-      int j = jbin - bin0;
-      double n1j = h2->GetBinContent(jbin);
-      int i_jbin = i - j + bin0;
-      double n1i_j =
-          (1 <= i_jbin && i_jbin <= nbins) ? h1->GetBinContent(i_jbin) : 0;
-      n2i += (n1j * n1i_j) / (3 * fN0);  // Eq. (11)
+      int i = ibin - bin0;
+      double n2i = 0;
+      for (int jbin = 1; jbin <= nbins; ++jbin) { // i' = j
+        int j = jbin - bin0;
+        double n1j = h[npe-1]->GetBinContent(jbin);
+        int i_jbin = i - j + bin0;
+        double n1i_j = (1 <= i_jbin && i_jbin <= nbins) ? h[1]->GetBinContent(i_jbin) : 0;
+        n2i += (n1j * n1i_j) / (npe * fN0); // Eq. (11)
+      }
+      h[npe]->SetBinContent(ibin, n2i);
     }
-    h3->SetBinContent(ibin, n2i);
-    if (ibin % 50 == 1) printf("*");
-    if (ibin % 500 == 1) printf("check500\n");
   }
-
-  std::cout << "N2 is " << h2->Integral(1,-1) << "\tN3 is " << h3->Integral(1,-1) << std::endl;
+  std::cout <<"N1 to N"<<kMaxPE<< " is, " <<std::endl;
+  for (int i=1; i<=kMaxPE; ++i) std::cout << h[i]->Integral(1,-1) << "\t" ;
+  std::cout << std::endl;
   double Q1mean_7 = 0;
   auto xmin = fSignalH1->GetXaxis()->GetXmin();
   auto binwidth = fSignalH1->GetXaxis()->GetBinWidth(1);
 
   for (int i = 1; i <= nbins; ++i) {
-    Q1mean_7 += (xmin + i * binwidth) * (h1->GetBinContent(i));
+    Q1mean_7 += (xmin + i * binwidth) * (h[1]->GetBinContent(i));
   }
-  Q1mean_7 /= h1->Integral(1, -1);
-  std::cout << h1->GetName() << "'s <Q1>(7) is " << Q1mean_7 << std::endl;
+  Q1mean_7 /= h[1]->Integral(1, -1);
+  std::cout << h[1]->GetName() << "'s <Q1>(7) is " << Q1mean_7 << std::endl;
 
   double Q1mean_7err;
-  for (int i = 1; i < h1->FindBin(0); ++i) {
+  for (int i = 1; i < h[1]->FindBin(0); ++i) {
     Q1mean_7err += pow((xmin + binwidth * i) * fLambda + Q1mean_7, 2);
   }
-  for (int i = h1->FindBin(0); i <= nbins; ++i) {
-    Q1mean_7err += pow((xmin + binwidth * i), 2) * h1->GetBinContent(i);
+  for (int i = h[1]->FindBin(0); i <= nbins; ++i) {
+    Q1mean_7err += pow((xmin + binwidth * i), 2) * h[1]->GetBinContent(i);
   }
-  Q1mean_7err /= pow(h1->Integral(1, -1) * fLambda, 2);
+  Q1mean_7err /= pow(h[1]->Integral(1, -1) * fLambda, 2);
   Q1mean_7err = sqrt(Q1mean_7err);
 
-  std::cout << h1->GetName() << "'s <Q1>(7)error is " << Q1mean_7err
+  std::cout << h[1]->GetName() << "'s <Q1>(7)error is " << Q1mean_7err
             << std::endl;
-  std::cout << "lambda calc from (-log(fN0/Nonall):(Mean prop) = "<< fLambda << " : "<< fSignalH1->GetMean() / h1->GetMean() <<std::endl;
+  std::cout << "lambda calc from (-log(fN0/Nonall):(Mean prop) = "<< fLambda << " : "<< fSignalH1->GetMean() / h[1]->GetMean() <<std::endl;
   std::cout << "lambda from entry = " << fLambda << " ± " << fLambda_err_fromN << std::endl;
-  std::cout << "lambda from chage = " << fSignalH1->GetMean() / h1->GetMean() << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h1->GetMean(),2) + pow(fSignalH1->GetMean()*h1->GetStdDev()/(h1->GetMean()*h1->GetMean()),2) /h1->Integral(1,-1) ) <<std::endl;
+  std::cout << "lambda from chage = " << fSignalH1->GetMean() / h[1]->GetMean() << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h[1]->GetMean(),2) + pow(fSignalH1->GetMean()*h[1]->GetStdDev()/(h[1]->GetMean()*h[1]->GetMean()),2) /h[1]->Integral(1,-1) ) <<std::endl;
   //std::cout << "AmpGaining is " << GetAmpGain() << std::endl; 最終的にこれを見る？
 }
 
