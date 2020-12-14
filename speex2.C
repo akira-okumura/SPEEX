@@ -45,7 +45,6 @@ std::cout << x << std::endl;
 #include <vector>
 #include <utility>
 
-const int kMaxPE = 4;  // Max num of p.e.s to be taken into account
 
 double integrateUpToMinusOne(std::shared_ptr<TH1D> h) {
   // used for e.g. \Sigma_{-\inf} ^ {-1} n_all(i)
@@ -57,6 +56,7 @@ double integrateUpToMinusOne(std::shared_ptr<TH1D> h) {
 
 class SinglePEAnalyzer {
  private:
+  int kMaxPE = 3;  // Max num of p.e.s to be taken into account
   std::shared_ptr<TCanvas> fCanvas;
   std::shared_ptr<TH1D> fSignalH1;
   std::shared_ptr<TH1D> fNoiseH1;
@@ -95,6 +95,9 @@ class SinglePEAnalyzer {
   // void SetConiguration(std::string name, double par) {fConfiguration[name] =
   // par;}
   void Analyze();
+  void SetkMaxPE(int Iteration_MaxPE) {
+    kMaxPE = Iteration_MaxPE;
+  }
   void Iterate();
   void OnePEiterate(double N);
   void MakeNPEdist(EMakeNPE mode = kMakeNPE_Takahashi2018);
@@ -238,7 +241,7 @@ void SinglePEAnalyzer::Analyze() {
   std::cout << "fN0: " << fN0 << std::endl;
   fLambda_err_fromN = sqrt((1-alpha)/fN0);
   std::cout << "lambda calc from -log(fN0/Nonall) : " << fLambda << " ± " << fLambda_err_fromN << std::endl;
-
+  
   double Q1_8_err; //p12のdelta<Q1>_(8)
   for (int i = 1; i < fSignalH1->FindBin(0); ++i) {
     Q1_8_err += pow((xmin + binwidth * i) * avePE0 + aveQ, 2);
@@ -506,17 +509,18 @@ double  SinglePEAnalyzer::GetAmpGain() {
   return h1->GetMean() / (EC * PreampGain);
 }
 
-std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> test() {
+std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> test(int Iteration_MaxPE = 4) {
   auto ana = std::make_shared<SinglePEAnalyzer>();
   ana->ReadFile(READPATH, "signal", "noise", 5);
   //ReadFileでfileから取得→Rebinまでやってる
+  ana->SetkMaxPE(Iteration_MaxPE);
   ana->Analyze();
   std::cout << "\n**border**\n" << std::endl;
 
   auto ana2 = std::make_shared<SinglePEAnalyzer>();
   ana2->MakeMCSpectra(ana->GetNoiseH1(), ana->GetNPEDist(1), ana->GetLambda(), ana->GetSignalH1()->GetEntries(), true);
+  ana2->SetkMaxPE(Iteration_MaxPE);
   ana2->Analyze();
-
 
   std::cout << "\nanaのLambda比較 fLamb : cLamb "<<std::endl;
   std::cout << ana->GetLambda() << " ± " << ana->GetLambdaErr() << "\t" << ana->GetLambda_C() << " ± " << ana->GetLambda_CErr() << std::endl;
