@@ -44,6 +44,7 @@ std::cout << x << std::endl;
 #include <memory>
 #include <vector>
 #include <utility>
+#include <fstream> // include for Savedata_Lamb()
 
 
 double integrateUpToMinusOne(std::shared_ptr<TH1D> h) {
@@ -104,6 +105,7 @@ class SinglePEAnalyzer {
   void MakeNPEdistTakahashi2018();
   void MakeNPEdistFast();
   void CompareLambda_E_to_C();
+  void Savedata_Lamb();
   double GetAmpGain();
 };
 
@@ -509,12 +511,34 @@ double  SinglePEAnalyzer::GetAmpGain() {
   return h1->GetMean() / (EC * PreampGain);
 }
 
-std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> test(int Iteration_MaxPE = 4) {
+void SinglePEAnalyzer::Savedata_Lamb() {
+
+  std::ofstream out;
+  out.open("Lambs.txt", std::ios::app);
+  out << fLambda << "\t" << fLambda_err_fromN << "\t" << cLambda << "\t" << cLambda_err
+      << std::endl;
+  out.close();
+
+}
+
+void Savedata_1PECharge(std::shared_ptr<SinglePEAnalyzer> ana,std::shared_ptr<SinglePEAnalyzer> ana2) {
+  //Ent,Mean,MeanErr,StdD,StdDErr,Ent...(10 properties)
+  std::ofstream out;
+  out.open("Charge_HV.txt", std::ios::app);
+  out << ana->GetNPEDist(1)->Integral(1,-1) << "\t" << ana->GetNPEDist(1)->GetMean() << "\t" << ana->GetNPEDist(1)->GetMeanError()
+  << "\t" << ana->GetNPEDist(1)->GetStdDev() << "\t" << ana->GetNPEDist(1)->GetStdDevError()
+  << "\t" << ana2->GetNPEDist(1)->Integral(1,-1) << "\t" << ana2->GetNPEDist(1)->GetMean() << "\t" << ana2->GetNPEDist(1)->GetMeanError()
+  << "\t" << ana2->GetNPEDist(1)->GetStdDev() << "\t" << ana2->GetNPEDist(1)->GetStdDevError() << std::endl;
+  out.close();
+}
+
+std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> test(int Iteration_MaxPE = 4,const std::string& file_name = READPATH) {
   auto ana = std::make_shared<SinglePEAnalyzer>();
-  ana->ReadFile(READPATH, "signal", "noise", 5);
+  ana->ReadFile(file_name, "signal", "noise", 5);
   //ReadFileでfileから取得→Rebinまでやってる
   ana->SetkMaxPE(Iteration_MaxPE);
   ana->Analyze();
+  
   std::cout << "\n**border**\n" << std::endl;
 
   auto ana2 = std::make_shared<SinglePEAnalyzer>();
@@ -527,9 +551,33 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   std::cout << "Signalとana2のCharge比較 Signal : ana2 "<<std::endl;
   std::cout << ana->GetSignalH1()->GetMean() << " ± " << ana->GetSignalH1()->GetMeanError() << "\t" << ana2->GetSignalH1()->GetMean() << " ± " << ana2->GetSignalH1()->GetMeanError() << std::endl;
   
+  std::cout << "\nanaとana2のCharge比較"<<std::endl;
+  std::cout << "ana1 1PE dist Entry:" << ana->GetNPEDist(1)->Integral(1,-1) << std::endl;
+  std::cout << "ana1 1PE dist Mean :" << ana->GetNPEDist(1)->GetMean() <<" ± " << ana->GetNPEDist(1)->GetMeanError() << std::endl;
+  std::cout << "ana1 1PE dist StdDv:" << ana->GetNPEDist(1)->GetStdDev() <<" ± " << ana->GetNPEDist(1)->GetStdDevError() << std::endl;
+  std::cout << "ana2 1PE dist Entry:" << ana2->GetNPEDist(1)->Integral(1,-1) << std::endl;
+  std::cout << "ana2 1PE dist Mean :" << ana2->GetNPEDist(1)->GetMean() <<" ± " << ana2->GetNPEDist(1)->GetMeanError() << std::endl;
+  std::cout << "ana2 1PE dist StdDv:" << ana2->GetNPEDist(1)->GetStdDev() <<" ± " << ana2->GetNPEDist(1)->GetStdDevError() << std::endl;
+  
+  //Savedata_1PECharge(ana,ana2);
   return std::make_pair(ana, ana2);
 
   //欲しい情報
   //anaのみでLambda比較: fLambda(calc from Entry = -log(fN0 / Nonall)),cLambda(calc from charge = <Q_all>/<Q_1>)
   //anaとana2でCharge比較:fSignal->GetMean(),fSignal->GetMeanError()
+}
+
+void test_HV() {
+  //this function cannot work propery
+  //TODO:fix this error
+  std::vector<std::string> filenames = {};
+  std::string nameH = "PMT_HVCharge/turn";
+  std::string nameF = "_CH1.root";
+  for (int i = 10; i<=15; ++i) {
+    std::string nameB = std::to_string(i);
+    std::string fname = nameH + nameB + nameF;
+    std::cout << fname << std::endl; 
+    // auto anas = test(5,filenames) //this is cause of the error
+    filenames.push_back(fname);
+  }
 }
