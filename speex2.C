@@ -512,13 +512,11 @@ double  SinglePEAnalyzer::GetAmpGain() {
 }
 
 void SinglePEAnalyzer::Savedata_Lamb() {
-
   std::ofstream out;
   out.open("Lambs.txt", std::ios::app);
   out << fLambda << "\t" << fLambda_err_fromN << "\t" << cLambda << "\t" << cLambda_err
       << std::endl;
   out.close();
-
 }
 
 void Savedata_1PECharge(std::shared_ptr<SinglePEAnalyzer> ana,std::shared_ptr<SinglePEAnalyzer> ana2) {
@@ -526,6 +524,18 @@ void Savedata_1PECharge(std::shared_ptr<SinglePEAnalyzer> ana,std::shared_ptr<Si
   std::ofstream out;
   out.open("Charge_HV.txt", std::ios::app);
   out << ana->GetNPEDist(1)->Integral(1,-1) << "\t" << ana->GetNPEDist(1)->GetMean() << "\t" << ana->GetNPEDist(1)->GetMeanError()
+  << "\t" << ana->GetNPEDist(1)->GetStdDev() << "\t" << ana->GetNPEDist(1)->GetStdDevError()
+  << "\t" << ana2->GetNPEDist(1)->Integral(1,-1) << "\t" << ana2->GetNPEDist(1)->GetMean() << "\t" << ana2->GetNPEDist(1)->GetMeanError()
+  << "\t" << ana2->GetNPEDist(1)->GetStdDev() << "\t" << ana2->GetNPEDist(1)->GetStdDevError() << std::endl;
+  out.close();
+}
+
+void Savedata_Lamb_and_Charge(std::shared_ptr<SinglePEAnalyzer> ana,std::shared_ptr<SinglePEAnalyzer> ana2) {
+  //fLamb,fLambErr,cLamb,cLambErr,[ana]Ent,Mean,MeanErr,StdD,StdDErr,[ana]Ent...(14 properties)
+  std::ofstream out;
+  out.open("data.txt", std::ios::app);
+  out << ana->GetLambda() << "\t" << ana->GetLambdaErr() << "\t" << ana->GetLambda_C() << "\t" << ana->GetLambda_CErr() 
+  << "\t" << ana->GetNPEDist(1)->Integral(1,-1) << "\t" << ana->GetNPEDist(1)->GetMean() << "\t" << ana->GetNPEDist(1)->GetMeanError()
   << "\t" << ana->GetNPEDist(1)->GetStdDev() << "\t" << ana->GetNPEDist(1)->GetStdDevError()
   << "\t" << ana2->GetNPEDist(1)->Integral(1,-1) << "\t" << ana2->GetNPEDist(1)->GetMean() << "\t" << ana2->GetNPEDist(1)->GetMeanError()
   << "\t" << ana2->GetNPEDist(1)->GetStdDev() << "\t" << ana2->GetNPEDist(1)->GetStdDevError() << std::endl;
@@ -558,13 +568,24 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   std::cout << "ana2 1PE dist Entry:" << ana2->GetNPEDist(1)->Integral(1,-1) << std::endl;
   std::cout << "ana2 1PE dist Mean :" << ana2->GetNPEDist(1)->GetMean() <<" ± " << ana2->GetNPEDist(1)->GetMeanError() << std::endl;
   std::cout << "ana2 1PE dist StdDv:" << ana2->GetNPEDist(1)->GetStdDev() <<" ± " << ana2->GetNPEDist(1)->GetStdDevError() << std::endl;
-  
-  //Savedata_1PECharge(ana,ana2);
+  Savedata_Lamb_and_Charge(ana,ana2);
   return std::make_pair(ana, ana2);
 
   //欲しい情報
   //anaのみでLambda比較: fLambda(calc from Entry = -log(fN0 / Nonall)),cLambda(calc from charge = <Q_all>/<Q_1>)
-  //anaとana2でCharge比較:fSignal->GetMean(),fSignal->GetMeanError()
+  //anaとana2でCharge比較:Ent,Mean,MeanErr,StdD,StdDErrを二つで
+}
+
+std::shared_ptr<SinglePEAnalyzer> Draw_raw_dist(const std::string& file_name = READPATH) {
+  TCanvas *fcan = new TCanvas("fcan", "fcan", 1400, 600);
+  gPad->SetLogy(1);
+  auto ana = std::make_shared<SinglePEAnalyzer>();
+  ana->ReadFile(file_name, "signal", "noise", 5);
+  ana->GetSignalH1()->GetYaxis()->SetRangeUser(0.8,10000);
+  ana->GetSignalH1()->Draw("same");
+  ana->GetNoiseH1()->SetLineColor(2);
+  ana->GetNoiseH1()->Draw("same");
+  return ana;
 }
 
 void test_HV() {
