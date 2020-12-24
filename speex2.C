@@ -35,6 +35,7 @@ std::cout << x << std::endl;
 // #define READPATH "PMT_HVChange/turn12_CH1.root"
 
 #include <TCanvas.h>
+#include <TLegend.h>
 #include <TFile.h>
 #include <TH1D.h>
 #include <TRandom.h>
@@ -62,6 +63,7 @@ class SinglePEAnalyzer {
   std::shared_ptr<TH1D> fSignalH1;
   std::shared_ptr<TH1D> fNoiseH1;
   std::shared_ptr<TH1D> fSuminus0;
+  double alphaH1;
   double fN0;
   double fN1;
   double fLambda;
@@ -84,8 +86,10 @@ class SinglePEAnalyzer {
   double GetLambdaErr() const {return fLambda_err_fromN ;}
   double GetLambda_C() const {return cLambda;}
   double GetLambda_CErr() const {return cLambda_err;}
+  double GetAlpha() const {return alphaH1;}
   std::shared_ptr<TH1D> GetSignalH1() const { return fSignalH1; }
   std::shared_ptr<TH1D> GetNoiseH1() const { return fNoiseH1; }
+  std::shared_ptr<TH1D> GetSuminus0() const { return fSuminus0; }
   std::shared_ptr<TH1D> GetNPEDist(int n) const {
     try {
       return fNPEDist.back()[n];
@@ -96,6 +100,7 @@ class SinglePEAnalyzer {
   // void SetConiguration(std::string name, double par) {fConfiguration[name] =
   // par;}
   void Analyze();
+  void MakefSuminus0();
   void SetkMaxPE(int Iteration_MaxPE) {
     kMaxPE = Iteration_MaxPE;
   }
@@ -185,63 +190,18 @@ void SinglePEAnalyzer::Analyze() {
   fSignalH1->SetLineColor(5);
 
   // suminus0 means distribution of N[k>0]
-  fSuminus0.reset((TH1D*)fSignalH1->Clone("suminus0"));
-
-  auto integrate_negative_charge = [](std::shared_ptr<TH1D> h) {
-    // \Sigma_{-\inf} ^ {-1} n_all(i)
-    return h->Integral(1, h->FindBin(0) - 1);
-  };
-  double numerator = integrate_negative_charge(fSignalH1);
-  double denominator = integrate_negative_charge(fNoiseH1);
-  double alpha = numerator / denominator;  // See Eq. (3)
-  fSuminus0->Add(fNoiseH1.get(),
-                 -1 * alpha);  // n_{k > 0}(i) = n_all(i) - n_0(i)
-
-  // 0回りを整理する。fNoiseH1->GetStdDev()よりシグマの範囲を同じびんに放り込む
-  // 1.5σの範囲にするかどうかは議論の余地がある
-  double fNoiseH1_sigma = fNoiseH1->GetStdDev();
-  printf("fNoiseH1 StdDev is %f\n", fNoiseH1_sigma);
-  printf("this is %d bins (0bin is %d)\n", fNoiseH1->FindBin(fNoiseH1_sigma),
-         fNoiseH1->FindBin(0));
-
-  double together_bin_charge = 1;
-  int together_bin = 1; // = fSuminus->FindBin(together_bin_charge);
-  double together_bin_content = 0;
-  double together_bin_numerator = 0;    // bunshi
-  double together_bin_denominator = 0;  // bunbo
-
-  for (int i = 1; i <= fNoiseH1->GetNbinsX(); ++i) {
-    if (fNoiseH1->GetBinCenter(i) <=
-        0 * fNoiseH1_sigma) {  //ここの倍率は議論の余地がある
-      together_bin_content += fSuminus0->GetBinContent(i);
-      together_bin_denominator += fSuminus0->GetBinContent(i);
-      together_bin_numerator +=
-          fSuminus0->GetBinContent(i) * fNoiseH1->GetBinCenter(i);
-      fSuminus0->SetBinContent(i, 0);
-    }
-  }
-  together_bin_charge = (together_bin_numerator / together_bin_denominator);
-  together_bin = fSuminus0->FindBin(together_bin_charge);
-
-  printf("%f / %f so, toukeigosa_matomete_ireru_bin is %d \n",
-         together_bin_numerator, together_bin_denominator, together_bin);
-  printf("content is %f \n", together_bin_content);
-  fSuminus0->SetBinContent(together_bin, together_bin_content);
-  for (int i = 1; i <= fNoiseH1->GetNbinsX() / 2; ++i) {
-    if (fSuminus0->GetBinContent(i) < 0) fSuminus0->SetBinContent(i, 0);
-  }  // without it, contents of some bins can become negative number
-  fSuminus0->SetFillColor(1);
+  MakefSuminus0();
 
   double Noff0 = fNoiseH1->Integral();  // by definition above Eq. (1)
-  fN0 = 1.00 * Noff0 * alpha;  // (3)の下らへんに書いてるやつ
+  fN0 = 1.00 * Noff0 * alphaH1;  // (3)の下らへんに書いてるやつ
   double avePE0 = -log(
       fN0 / Nonall);  // <k> in Eq. (4), initial estimate of lamda
                       // NallとN0から<k>が推定可能なので、N0の推定のみで決まる
   fN1 = fN0 * avePE0;
   fLambda = avePE0;
-  std::cout << "alpha: " << alpha << std::endl;
+  std::cout << "alpha: " << alphaH1 << std::endl;
   std::cout << "fN0: " << fN0 << std::endl;
-  fLambda_err_fromN = sqrt((1-alpha)/fN0);
+  fLambda_err_fromN = sqrt((1-alphaH1)/fN0);
   std::cout << "lambda calc from -log(fN0/Nonall) : " << fLambda << " ± " << fLambda_err_fromN << std::endl;
   
   double Q1_8_err; //p12のdelta<Q1>_(8)
@@ -285,6 +245,55 @@ void SinglePEAnalyzer::Analyze() {
   std::cout << "1PE dist Entry:" << fNPEDist.back()[1]->Integral(1,-1) << std::endl;
   std::cout << "1PE dist Mean :" << fNPEDist.back()[1]->GetMean() <<" ± " << fNPEDist.back()[1]->GetMeanError() << std::endl;
   std::cout << "1PE dist StdDv:" << fNPEDist.back()[1]->GetStdDev() <<" ± " << fNPEDist.back()[1]->GetStdDevError() << std::endl;
+
+}
+
+void SinglePEAnalyzer::MakefSuminus0() {
+  fSuminus0.reset((TH1D*)fSignalH1->Clone("suminus0"));
+  auto integrate_negative_charge = [](std::shared_ptr<TH1D> h) {
+    // \Sigma_{-\inf} ^ {-1} n_all(i)
+    return h->Integral(1, h->FindBin(0) - 1);
+  };
+  double numerator = integrate_negative_charge(fSignalH1);
+  double denominator = integrate_negative_charge(fNoiseH1);
+  alphaH1 = numerator / denominator;  // See Eq. (3)
+  fSuminus0->Add(fNoiseH1.get(),
+                 -1 * alphaH1);  // n_{k > 0}(i) = n_all(i) - n_0(i) 
+
+  // 0回りを整理する。fNoiseH1->GetStdDev()よりシグマの範囲を同じびんに放り込む
+  // 1.5σの範囲にするかどうかは議論の余地がある
+  double fNoiseH1_sigma = fNoiseH1->GetStdDev();
+  printf("fNoiseH1 StdDev is %f\n", fNoiseH1_sigma);
+  printf("this is %d bins (0bin is %d)\n", fNoiseH1->FindBin(fNoiseH1_sigma),
+         fNoiseH1->FindBin(0));
+
+  double together_bin_charge = 1;
+  int together_bin = 1; // = fSuminus->FindBin(together_bin_charge);
+  double together_bin_content = 0;
+  double together_bin_numerator = 0;    // bunshi
+  double together_bin_denominator = 0;  // bunbo
+
+  for (int i = 1; i <= fNoiseH1->GetNbinsX(); ++i) {
+    if (fNoiseH1->GetBinCenter(i) <=
+        0 * fNoiseH1_sigma) {  //ここの倍率は議論の余地がある
+      together_bin_content += fSuminus0->GetBinContent(i);
+      together_bin_denominator += fSuminus0->GetBinContent(i);
+      together_bin_numerator +=
+          fSuminus0->GetBinContent(i) * fNoiseH1->GetBinCenter(i);
+      fSuminus0->SetBinContent(i, 0);
+    }
+  }
+  together_bin_charge = (together_bin_numerator / together_bin_denominator);
+  together_bin = fSuminus0->FindBin(together_bin_charge);
+
+  printf("%f / %f so, toukeigosa_matomete_ireru_bin is %d \n",
+         together_bin_numerator, together_bin_denominator, together_bin);
+  printf("content is %f \n", together_bin_content);
+  fSuminus0->SetBinContent(together_bin, together_bin_content);
+  for (int i = 1; i <= fNoiseH1->GetNbinsX() / 2; ++i) {
+    if (fSuminus0->GetBinContent(i) < 0) fSuminus0->SetBinContent(i, 0);
+  }  // without it, contents of some bins can become negative number
+  fSuminus0->SetFillColor(1);
 
 }
 
@@ -581,10 +590,21 @@ std::shared_ptr<SinglePEAnalyzer> Draw_raw_dist(const std::string& file_name = R
   gPad->SetLogy(1);
   auto ana = std::make_shared<SinglePEAnalyzer>();
   ana->ReadFile(file_name, "signal", "noise", 5);
+  ana->GetSignalH1()->SetTitle("Charge Distribution");
+  ana->GetSignalH1()->SetLineColor(6);
   ana->GetSignalH1()->GetYaxis()->SetRangeUser(0.8,10000);
   ana->GetSignalH1()->Draw("same");
-  ana->GetNoiseH1()->SetLineColor(2);
   ana->GetNoiseH1()->Draw("same");
+  ana->MakefSuminus0();
+  std::cout << ana->GetAlpha() <<std::endl;
+  ana->GetSuminus0()->SetFillColor(10);
+  ana->GetSuminus0()->SetLineColor(12);
+  ana->GetSuminus0()->Draw("same");
+  TLegend *leg = new TLegend( 0.60, 0.55, 0.90, 0.70) ; 
+  leg->AddEntry((TObject*)0, "Signal(pink)","");
+  leg->AddEntry((TObject*)0 , "Noise(blue)","");
+  leg->AddEntry((TObject*)0 , "Suminus0(gray)","");
+  leg->Draw();
   return ana;
 }
 
