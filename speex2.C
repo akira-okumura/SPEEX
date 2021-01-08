@@ -48,6 +48,7 @@ std::cout << x << std::endl;
 #include <fstream> // include for Savedata_Lamb()
 
 
+
 double integrateUpToMinusOne(std::shared_ptr<TH1D> h) {
   // used for e.g. \Sigma_{-\inf} ^ {-1} n_all(i)
   int minbin = 1;
@@ -87,6 +88,7 @@ class SinglePEAnalyzer {
   double GetLambda_C() const {return cLambda;}
   double GetLambda_CErr() const {return cLambda_err;}
   double GetAlpha() const {return alphaH1;}
+  double GetfN0() const {return fN0;}
   std::shared_ptr<TH1D> GetSignalH1() const { return fSignalH1; }
   std::shared_ptr<TH1D> GetNoiseH1() const { return fNoiseH1; }
   std::shared_ptr<TH1D> GetSuminus0() const { return fSuminus0; }
@@ -117,6 +119,8 @@ class SinglePEAnalyzer {
 SinglePEAnalyzer::SinglePEAnalyzer() {
   //Analyzeの先頭に移動
 }
+
+void two_analyzer_compare(std::shared_ptr<SinglePEAnalyzer> ana1, std::shared_ptr<SinglePEAnalyzer> ana2);
 
 void SinglePEAnalyzer::ReadFile(const std::string& file_name,
                                 const std::string& signal_name,
@@ -329,7 +333,7 @@ void SinglePEAnalyzer::Iterate() {
     }
   }
   OnePEiterate(fN1);  // 4th 1PE distribution 推定
-  MakeNPEdist(kMakeNPE_Fast_withNoise);      // 4th 2PE,3PE distribution
+  MakeNPEdist(kMakeNPE_Fast);      // 4th 2PE,3PE distribution
 }
 
 void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
@@ -611,7 +615,8 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   std::cout << "ana2 1PE dist Entry:" << ana2->GetNPEDist(1)->Integral(1,-1) << std::endl;
   std::cout << "ana2 1PE dist Mean :" << ana2->GetNPEDist(1)->GetMean() <<" ± " << ana2->GetNPEDist(1)->GetMeanError() << std::endl;
   std::cout << "ana2 1PE dist StdDv:" << ana2->GetNPEDist(1)->GetStdDev() <<" ± " << ana2->GetNPEDist(1)->GetStdDevError() << std::endl;
-  Savedata_Lamb_and_Charge_withNoiseV(ana,ana2,file_name);
+  // Savedata_Lamb_and_Charge_withNoiseV(ana,ana2,file_name); 
+  two_analyzer_compare(ana,ana2);
   return std::make_pair(ana, ana2);
 
   //欲しい情報
@@ -624,7 +629,9 @@ std::shared_ptr<SinglePEAnalyzer> Draw_raw_dist(const std::string& file_name = R
   gPad->SetLogy(1);
   auto ana = std::make_shared<SinglePEAnalyzer>();
   ana->ReadFile(file_name, "signal", "noise", 5);
-  ana->GetSignalH1()->SetTitle("Charge Distribution(noise 2450[mV])");
+  std::string title = "Charge Distribution of " + file_name; 
+  std::cout << title << std::endl;
+  ana->GetSignalH1()->SetTitle(title.c_str());
   ana->GetSignalH1()->SetLineColor(6);
   ana->GetSignalH1()->GetYaxis()->SetRangeUser(0.8,10000);
   ana->GetSignalH1()->Draw("same");
@@ -643,6 +650,7 @@ std::shared_ptr<SinglePEAnalyzer> Draw_raw_dist(const std::string& file_name = R
 }
 
 void test_HV() {
+
   //this function cannot work propery
   //TODO:fix this error
   std::vector<std::string> filenames = {};
@@ -655,4 +663,30 @@ void test_HV() {
     // auto anas = test(5,filenames) //this is cause of the error
     filenames.push_back(fname);
   }
+}
+
+void two_analyzer_compare(std::shared_ptr<SinglePEAnalyzer> ana1, std::shared_ptr<SinglePEAnalyzer> ana2) {
+  std::cout << "aho" << typeid(ana1).name() <<  typeid(ana2).name() << std::endl;
+  TCanvas *comp_can = new TCanvas("comp_can","comp_can", 1500, 600);
+  comp_can->Divide(3, 1, 0.01, 0.01);
+  comp_can->cd(1); 
+  gPad->SetLogy(1);
+  ana1->GetSignalH1()->SetTitle("ana1 1PE dist");
+  ana1->GetSignalH1()->Draw("same");
+  ana1->GetNPEDist(1)->Draw("same");
+  comp_can->cd(2);
+  gPad->SetLogy(1);
+  ana2->GetSignalH1()->SetTitle("ana2 1PE dist");
+  ana2->GetSignalH1()->Draw("same");
+  ana2->GetNPEDist(1)->Draw("same");
+
+  auto *SinglePE_compare= (TH1D *)ana1->GetNPEDist(1)->Clone("SinglePE_compare");
+  SinglePE_compare->SetTitle("dev of ana1 to ana2");
+  SinglePE_compare->Add(ana2->GetNPEDist(1).get(), -1);
+  auto *fSignal_compare = (TH1D *)ana1->GetSignalH1()->Clone("fSignal_compare");
+  fSignal_compare->Add(ana2->GetSignalH1().get(),-1);
+  comp_can->cd(3);
+  fSignal_compare->Draw("same");
+  SinglePE_compare->Draw("same");
+
 }
