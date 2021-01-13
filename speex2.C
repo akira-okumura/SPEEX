@@ -1,5 +1,3 @@
-//12/10　GitHub
-
 /*
 lamb_check.Cでチェック
 root [0] .L okumura1202.C+
