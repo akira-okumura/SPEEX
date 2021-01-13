@@ -353,7 +353,7 @@ void SinglePEAnalyzer::Iterate() {
     }
   }
   OnePEiterate(fN1);  // 4th 1PE distribution 推定
-  MakeNPEdist(kMakeNPE_Fast);      // 4th 2PE,3PE distribution
+  MakeNPEdist(kMakeNPE_Fast_withNoise);      // 4th 2PE,3PE distribution
 }
 
 void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
@@ -396,20 +396,21 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
         n2i += (n1j * n1i_j) / (npe * fN0); // Eq. (11)
       }
       h[npe]->SetBinContent(ibin, n2i);
-
-      if (Blur_with_Noise == true) {
-        for (int ibin = 1; ibin <= nbins; ++ibin) {
-          int i = ibin - bin0;
-          double n2i = 0;
-          for (int jbin = 1; jbin <= nbins; ++jbin) { // i' = j
-            int j = jbin - bin0;
-            double n1j = h[npe]->GetBinContent(jbin);
-            int i_jbin = i - j + bin0;
-            double n1i_j = (1 <= i_jbin && i_jbin <= nbins) ? fNoiseH1->GetBinContent(i_jbin) : 0;
-            n2i += alphaH1 * n1j * n1i_j / fN0; // Eq. (11)
-          }
-          h[npe]->SetBinContent(ibin, n2i);
+    }
+  }
+  if (Blur_with_Noise == true) {
+    for (int npe =2; npe<=kMaxPE; ++npe) {
+      for (int ibin = 1; ibin <= nbins; ++ibin) {
+        int i = ibin - bin0;
+        double n2i = 0;
+        for (int jbin = 1; jbin <= nbins; ++jbin) {
+          int j = jbin - bin0;
+          double n1j = h[npe]->GetBinContent(jbin);
+          int i_jbin = i - j + bin0;
+          double n1i_j = (1 <= i_jbin && i_jbin <= nbins) ? fNoiseH1->GetBinContent(i_jbin) : 0;
+          n2i += alphaH1 * n1j * n1i_j / fN0; // Eq. (11)
         }
+        h[npe]->SetBinContent(ibin, n2i);
       }
     }
   }
