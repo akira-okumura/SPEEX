@@ -199,15 +199,33 @@ void SinglePEAnalyzer::Analyze() {
   double Noff0 = fNoiseH1->Integral();  // by definition above Eq. (1)
   fN0 = 1.00 * Noff0 * alphaH1;  // (3)の下らへんに書いてるやつ
   double avePE0 = -log(
-      fN0 / Nonall);  // <k> in Eq. (4), initial estimate of lamda
+      fN0 / Nonall);  // <k> in Eq. (4), initial estimate of Lada
                       // NallとN0から<k>が推定可能なので、N0の推定のみで決まる
   fN1 = fN0 * avePE0;
   fLambda = avePE0;
-  std::cout << "alpha: " << alphaH1 << std::endl;
-  std::cout << "fN0: " << fN0 << std::endl;
+  std::cout << "Noff0 = " << Noff0 <<std::endl;
+  std::cout << "alpha = " << alphaH1 << std::endl;
+  std::cout << "fN0 = Noff0 * alpha = " << fN0 << std::endl;
   fLambda_err_fromN = sqrt((1-alphaH1)/fN0);
   std::cout << "lambda calc from -log(fN0/Nonall) : " << fLambda << " ± " << fLambda_err_fromN << std::endl;
+
+  double Noff0_r = 2 * integrateUpToMinusOne(fNoiseH1);
+  double lambda_noise = -log(Noff0_r / Noff0);
+  double Non0_r = 2 * integrateUpToMinusOne(fSignalH1);
+  double lambda_signal = -log(Non0_r / Nonall);
+  double fLambda_r = lambda_signal - lambda_noise ;
   
+  std::cout << "Noff0_r = " << Noff0 <<std::endl;
+  std::cout << "alpha_r:" << double(Non0_r / Noff0_r ) <<std::endl;
+  std::cout << "fN0_r = Noff0_r * alpha_r =  " << Non0_r << std::endl;
+
+  std::cout << "lambda calc from -log(Non0_r/Nonall) + log(Noff0_r/Noffall) = "
+  << lambda_signal << " - " << lambda_noise << " = " << fLambda_r << std::endl;
+  //-log(Non0_r/Nonall) + log(Noff0_r/Noffall)から導出するlambdaが一致する
+  std::cout << "entries check : signal / noise / suminus0" <<std::endl;
+  std::cout << "                " << fSignalH1->Integral() << "\t" << fNoiseH1->Integral() << "\t" << fSuminus0->Integral() << std::endl;
+  std::cout <<"lambda by ln(Nall/N0) = " <<log(fSignalH1->Integral() / (fSignalH1->Integral() - fSuminus0->Integral())) <<std::endl;
+
   double Q1_8_err; //p12のdelta<Q1>_(8)
   for (int i = 1; i < fSignalH1->FindBin(0); ++i) {
     Q1_8_err += pow((xmin + binwidth * i) * avePE0 + aveQ, 2);
@@ -237,14 +255,16 @@ void SinglePEAnalyzer::Analyze() {
     fSignalH1->SetLineColor(6);
     fSignalH1->Draw("same");
   }
-  cLambda = fSignalH1->GetMean() / fNPEDist.back()[1]->GetMean() ;
-  cLambda_err =sqrt( pow(fSignalH1->GetMeanError()/fNPEDist.back()[1]->GetMean(),2) + pow(fSignalH1->GetMean()*fNPEDist.back()[1]->GetStdDev()/(fNPEDist.back()[1]->GetMean()*fNPEDist.back()[1]->GetMean()),2) /fNPEDist.back()[1]->Integral(1,-1) );
-
+  //cLambda = fSignalH1->GetMean() / fNPEDist.back()[1]->GetMean() ;
+  //cLambda_err =sqrt( pow(fSignalH1->GetMeanError()/fNPEDist.back()[1]->GetMean(),2) + pow(fSignalH1->GetMean()*fNPEDist.back()[1]->GetStdDev()/(fNPEDist.back()[1]->GetMean()*fNPEDist.back()[1]->GetMean()),2) /fNPEDist.back()[1]->Integral(1,-1) );
+  cLambda =  (fSignalH1->GetMean() - fNoiseH1->GetMean()) / fNPEDist.back()[1]->GetMean();
+  cLambda_err =sqrt( pow((fSignalH1->GetMeanError() - fNoiseH1->GetMeanError())/fNPEDist.back()[1]->GetMean(),2) + pow((fSignalH1->GetMean() - fNoiseH1->GetMean() )*fNPEDist.back()[1]->GetStdDev()/(fNPEDist.back()[1]->GetMean()*fNPEDist.back()[1]->GetMean()),2) /fNPEDist.back()[1]->Integral(1,-1) );
   CompareLambda_E_to_C(); //lambdaを出す二つの方法で違いが出ないかチェック
   std::cout << "ANS lambda from entry  :" << fLambda <<" ± " << fLambda_err_fromN  << std::endl;
   std::cout << "ANS lambda from charge :" << cLambda <<" ± " << cLambda_err << std::endl;
   std::cout << "fSignalMean(平均電荷量) is " << fSignalH1->GetMean() << "±" << fSignalH1->GetMeanError() <<std::endl;
-
+  std::cout << "fSuminusMean(平均電荷量) is " << fSuminus0->GetMean() << "±" << fSuminus0->GetMeanError() <<std::endl;
+  std::cout << "fcollectMean(平均電荷量) is " << (fSignalH1->GetMean() - fNoiseH1->GetMean())  << "±" << fSuminus0->GetMeanError() <<std::endl;
   std::cout << "1PE分布に関する情報" << std::endl; 
   std::cout << "1PE dist Entry:" << fNPEDist.back()[1]->Integral(1,-1) << std::endl;
   std::cout << "1PE dist Mean :" << fNPEDist.back()[1]->GetMean() <<" ± " << fNPEDist.back()[1]->GetMeanError() << std::endl;
@@ -260,7 +280,7 @@ void SinglePEAnalyzer::MakefSuminus0() {
   };
   double numerator = integrate_negative_charge(fSignalH1);
   double denominator = integrate_negative_charge(fNoiseH1);
-  alphaH1 = numerator / denominator;  // See Eq. (3)
+  alphaH1 = 1.0* numerator / denominator;  // See Eq. (3)
   fSuminus0->Add(fNoiseH1.get(),
                  -1 * alphaH1);  // n_{k > 0}(i) = n_all(i) - n_0(i) 
 
@@ -376,6 +396,7 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
         n2i += (n1j * n1i_j) / (npe * fN0); // Eq. (11)
       }
       h[npe]->SetBinContent(ibin, n2i);
+
       if (Blur_with_Noise == true) {
         for (int ibin = 1; ibin <= nbins; ++ibin) {
           int i = ibin - bin0;
@@ -516,6 +537,7 @@ void SinglePEAnalyzer::OnePEiterate(double N) {
 void SinglePEAnalyzer::CompareLambda_E_to_C() {
   //compare_flambda : cLambda;
   std::cout << "lambdaを出す二つの方法で違いが出ないかチェック" <<std::endl;
+  std::cout << "fLambda,cLambda = " << fLambda << ", " << cLambda << std::endl;
   int number_of_N = 0;
   double Total_Entries_E = 0;
   double Total_Entries_C = 0;
@@ -528,7 +550,7 @@ void SinglePEAnalyzer::CompareLambda_E_to_C() {
     ++number_of_N;
     NPE_Entry_E *= double(fLambda/number_of_N);
     NPE_Entry_C *= double(cLambda/number_of_N);
-  } while ( NPE_Entry_E > 1 || NPE_Entry_C > 1);
+  } while ( NPE_Entry_E > 1 || NPE_Entry_C > 1 || number_of_N < 10 );
   std::cout << "from Entries:Total Entries calc PE0 to PE" << number_of_N-1 <<"  is " << Total_Entries_E << std::endl;
   std::cout << "from Charge :Total Entries calc PE0 to PE" << number_of_N-1 <<"  is " << Total_Entries_C << std::endl;
   std::cout << "Total Entries calc from fSignal->Integral() is " << fSignalH1->Integral(1,-1) << std::endl;
@@ -576,8 +598,13 @@ void Savedata_Lamb_and_Charge_withNoiseV(std::shared_ptr<SinglePEAnalyzer> ana,s
   //NoiseHV,HV(/100),fLamb,fLambErr,cLamb,cLambErr,[ana]Ent,Mean,MeanErr,StdD,StdDErr,[ana]Ent...(16 properties)
   std::ofstream out;//Noise2450/turn14_CH1
   out.open("data.txt", std::ios::app);
-  for (int i=5; i<=8; ++i) {out <<file_name[i]; }
-  out << "\t" << file_name[14] << file_name[15] 
+  if (file_name[0] == 'N') {
+    for (int i=5; i<=8; ++i) {out <<file_name[i];}
+  } else {
+    out << '0' ;
+  }
+
+  out << "\t" << file_name[file_name.size() -11] << file_name[file_name.size() - 10] 
   << "\t" << ana->GetLambda() << "\t" << ana->GetLambdaErr() << "\t" << ana->GetLambda_C() << "\t" << ana->GetLambda_CErr() 
   << "\t" << ana->GetNPEDist(1)->Integral(1,-1) << "\t" << ana->GetNPEDist(1)->GetMean() << "\t" << ana->GetNPEDist(1)->GetMeanError()
   << "\t" << ana->GetNPEDist(1)->GetStdDev() << "\t" << ana->GetNPEDist(1)->GetStdDevError()
@@ -609,13 +636,16 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   std::cout << ana->GetSignalH1()->GetMean() << " ± " << ana->GetSignalH1()->GetMeanError() << "\t" << ana2->GetSignalH1()->GetMean() << " ± " << ana2->GetSignalH1()->GetMeanError() << std::endl;
   
   std::cout << "\nanaとana2のCharge比較"<<std::endl;
+  std::cout << "fSignalとfNoiseのMean" << std::endl;
+  std::cout << ana->GetSignalH1()->GetMean() << "\t" << ana->GetNoiseH1()->GetMean() << "\t" << ana->GetSignalH1()->GetMean() - ana->GetNoiseH1()->GetMean() << "\t" << ana->GetSuminus0()->GetMean() <<std::endl ;
+  std::cout << ana2->GetSignalH1()->GetMean() << "\t" << ana2->GetNoiseH1()->GetMean() << "\t" << ana2->GetSignalH1()->GetMean() - ana2->GetNoiseH1()->GetMean() << "\t" << ana2->GetSuminus0()->GetMean() << std::endl;
   std::cout << "ana1 1PE dist Entry:" << ana->GetNPEDist(1)->Integral(1,-1) << std::endl;
   std::cout << "ana1 1PE dist Mean :" << ana->GetNPEDist(1)->GetMean() <<" ± " << ana->GetNPEDist(1)->GetMeanError() << std::endl;
   std::cout << "ana1 1PE dist StdDv:" << ana->GetNPEDist(1)->GetStdDev() <<" ± " << ana->GetNPEDist(1)->GetStdDevError() << std::endl;
   std::cout << "ana2 1PE dist Entry:" << ana2->GetNPEDist(1)->Integral(1,-1) << std::endl;
   std::cout << "ana2 1PE dist Mean :" << ana2->GetNPEDist(1)->GetMean() <<" ± " << ana2->GetNPEDist(1)->GetMeanError() << std::endl;
   std::cout << "ana2 1PE dist StdDv:" << ana2->GetNPEDist(1)->GetStdDev() <<" ± " << ana2->GetNPEDist(1)->GetStdDevError() << std::endl;
-  // Savedata_Lamb_and_Charge_withNoiseV(ana,ana2,file_name); 
+  //Savedata_Lamb_and_Charge_withNoiseV(ana,ana2,file_name); 
   two_analyzer_compare(ana,ana2);
   return std::make_pair(ana, ana2);
 
@@ -638,7 +668,7 @@ std::shared_ptr<SinglePEAnalyzer> Draw_raw_dist(const std::string& file_name = R
   ana->GetNoiseH1()->Draw("same");
   ana->MakefSuminus0();
   std::cout << ana->GetAlpha() <<std::endl;
-  ana->GetSuminus0()->SetFillColor(10);
+  ana->GetSuminus0()->SetFillColor(0);
   ana->GetSuminus0()->SetLineColor(12);
   ana->GetSuminus0()->Draw("same");
   TLegend *leg = new TLegend( 0.60, 0.55, 0.90, 0.70) ; 
@@ -646,6 +676,8 @@ std::shared_ptr<SinglePEAnalyzer> Draw_raw_dist(const std::string& file_name = R
   leg->AddEntry((TObject*)0 , "Noise(blue)","");
   leg->AddEntry((TObject*)0 , "Suminus0(gray)","");
   leg->Draw();
+  std::cout << "fNoise Mean = " << ana->GetNoiseH1()->GetMean() << std::endl;
+  std::cout << "fNoise Integral = " << ana->GetNoiseH1()->Integral() << std::endl;
   return ana;
 }
 
@@ -671,15 +703,16 @@ void two_analyzer_compare(std::shared_ptr<SinglePEAnalyzer> ana1, std::shared_pt
   comp_can->Divide(3, 1, 0.01, 0.01);
   comp_can->cd(1); 
   gPad->SetLogy(1);
-  ana1->GetSignalH1()->SetTitle("ana1 1PE dist");
-  ana1->GetSignalH1()->Draw("same");
+  ana1->GetNPEDist(1)->SetTitle("ana1 1PE dist");
+  ana1->GetNPEDist(1)->GetYaxis()->SetRangeUser(0.8,1000);
   ana1->GetNPEDist(1)->Draw("same");
+  ana1->GetSignalH1()->Draw("same");
   comp_can->cd(2);
   gPad->SetLogy(1);
-  ana2->GetSignalH1()->SetTitle("ana2 1PE dist");
-  ana2->GetSignalH1()->Draw("same");
+  ana2->GetNPEDist(1)->SetTitle("ana2 1PE dist");
+  ana2->GetNPEDist(1)->GetYaxis()->SetRangeUser(0.8,1000);
   ana2->GetNPEDist(1)->Draw("same");
-
+  ana2->GetSignalH1()->Draw("same");
   auto *SinglePE_compare= (TH1D *)ana1->GetNPEDist(1)->Clone("SinglePE_compare");
   SinglePE_compare->SetTitle("dev of ana1 to ana2");
   SinglePE_compare->Add(ana2->GetNPEDist(1).get(), -1);
