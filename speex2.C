@@ -78,6 +78,7 @@ class SinglePEAnalyzer {
 
  public:
   enum EMakeNPE {kMakeNPE_Takahashi2018, kMakeNPE_Fast, kMakeNPE_Fast_withNoise};
+  enum fN0_calc {fN0_Takahashi2018,fN0_Ishida2021};
 
   SinglePEAnalyzer();
   void ReadFile(const std::string& file_name, const std::string& signal_name,
@@ -101,7 +102,9 @@ class SinglePEAnalyzer {
   }
   // void SetConiguration(std::string name, double par) {fConfiguration[name] =
   // par;}
-  void Analyze();
+  void Analyze(fN0_calc mode = fN0_Takahashi2018);
+  void Analyze_Takahashi2018();
+  void Analyze_Ishida2021();
   void MakefSuminus0();
   void SetkMaxPE(int Iteration_MaxPE) {
     kMaxPE = Iteration_MaxPE;
@@ -168,7 +171,18 @@ void SinglePEAnalyzer::MakeMCSpectra(std::shared_ptr<TH1D> noise, std::shared_pt
   }
 }
 
-void SinglePEAnalyzer::Analyze() {
+void SinglePEAnalyzer::Analyze(fN0_calc mode) {
+  switch(mode) {
+  case fN0_Takahashi2018 :
+    Analyze_Takahashi2018()
+    break;
+  default:
+    Analyze_Takahashi2018();
+    break;
+  }
+}
+
+void SinglePEAnalyzer::Analyze_Takahashi2018() {
   // main method
   std::cout << "fSignalMean is " << fSignalH1->GetMean() << "±" << fSignalH1->GetMeanError() <<std::endl;
 
@@ -353,7 +367,7 @@ void SinglePEAnalyzer::Iterate() {
     }
   }
   OnePEiterate(fN1);  // 4th 1PE distribution 推定
-  MakeNPEdist(kMakeNPE_Fast_withNoise);      // 4th 2PE,3PE distribution
+  MakeNPEdist(kMakeNPE_Fast);      // 4th 2PE,3PE distribution
 }
 
 void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
@@ -622,14 +636,14 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   ana->ReadFile(file_name, "signal", "noise", 5);
   //ReadFileでfileから取得→Rebinまでやってる
   ana->SetkMaxPE(Iteration_MaxPE);
-  ana->Analyze();
+  ana->Analyze(fN0_Takahashi2018);
   
   std::cout << "\n**border**\n" << std::endl;
 
   auto ana2 = std::make_shared<SinglePEAnalyzer>();
   ana2->MakeMCSpectra(ana->GetNoiseH1(), ana->GetNPEDist(1), ana->GetLambda(), ana->GetSignalH1()->GetEntries(), true);
   ana2->SetkMaxPE(Iteration_MaxPE);
-  ana2->Analyze();
+  ana2->Analyze(fN0_Takahashi2018);
 
   std::cout << "\nanaのLambda比較 fLamb : cLamb "<<std::endl;
   std::cout << ana->GetLambda() << " ± " << ana->GetLambdaErr() << "\t" << ana->GetLambda_C() << " ± " << ana->GetLambda_CErr() << std::endl;
