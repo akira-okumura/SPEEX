@@ -72,7 +72,8 @@ class SinglePEAnalyzer {
   double cLambda_err;
 
   std::vector<std::vector<std::shared_ptr<TH1D>>> fNPEDist;
-  std::vector<std::shared_ptr<TH1D>> f0PEDist;
+  std::vector<std::shared_ptr<TH1D>> f0PEDist; //Iterate_Ishidaで毎回作るfSuminus0のこと
+  std::vector<std::shared_ptr<TH1D>> Blured1PEDist; //Iterate_Ishidaの為に必要。1PEDistをNoiseでぼかしたもの
 
   // std::map<std::string, double> fConfiguration;
 
@@ -115,6 +116,7 @@ class SinglePEAnalyzer {
   void Iterate_Takahashi2018();
   void Iterate_Ishida2021();
   void OnePEiterate(double N);
+  void MakeBlured1PEdist();
   void MakeNPEdist(EMakeNPE mode = kMakeNPE_Takahashi2018);
   void MakeNPEdistTakahashi2018();
   void MakeNPEdistFast(bool Blur_with_Noise = false);
@@ -352,11 +354,13 @@ void SinglePEAnalyzer::Makef0PEdist() {
   f0PEDist.push_back(std::make_shared<TH1D>(Form("0PEDist_%luth",n),";Charge;Entries/bin", nbins, xmin, xmax));
 
   auto h = f0PEDist.back();
-
-  if (n !=0){
+  MakeBlured1PEdist();
+  std::cout << n <<std::endl;
+  //TODO: ここを1PENoise考慮する
+  if (n !=1){
     h->Add(fSignalH1.get());
-
-    for (int i = 1 ; i <= kMaxPE; ++i) h->Add(fNPEDist[n-1][i].get(), -1 );
+    //h->Add(Blured1PEDist[n].get(),-1);
+    for (int i = 1 ; i <= kMaxPE; ++i) h->Add(fNPEDist[n-1][i].get(), -1 ); 
   } else {
     h->Add(fSignalH1.get());
   }
@@ -635,6 +639,37 @@ void SinglePEAnalyzer::OnePEiterate(double N) {
       h1->SetBinContent(i, N - (sum - c));
       break;
     }
+  }
+}
+
+void SinglePEAnalyzer::MakeBlured1PEdist() {
+
+  int nbins = fNoiseH1->GetNbinsX();
+  auto xmin = fNoiseH1->GetXaxis()->GetXmin();
+  auto xmax = fNoiseH1->GetXaxis()->GetXmax();
+  int bin0 = fNoiseH1->FindBin(0);
+  auto h1 = fNPEDist.back()[1];
+
+
+  Blured1PEDist.push_back(std::make_shared<TH1D>(Form("Blured1PEDist_%luth",fNPEDist.size()),";Charge;Entries/bin", nbins, xmin, xmax));
+  auto h = Blured1PEDist.back();
+  std::cout << Blured1PEDist.size() - 1 << "th blured" <<std::endl;
+  if (Blured1PEDist.size() != 1) {
+    for (int ibin = 1; ibin <= nbins; ++ibin) {
+      int i = ibin - bin0;
+      double n2i = 0;
+      for (int jbin = 1; jbin <= nbins; ++jbin) {
+        int j = jbin - bin0;
+        double n1j = h1->GetBinContent(jbin);
+        int i_jbin = i - j + bin0;
+        double n1i_j = (1 <= i_jbin && i_jbin <= nbins) ? fNoiseH1->GetBinContent(i_jbin) : 0;
+        n2i += alphaH1 * n1j * n1i_j / fN0; // Eq. (11)
+      }
+      h->SetBinContent(ibin, n2i);
+    }
+  }else {
+    for (int ibin=1; ibin<=nbins; ++ibin) h->SetBinContent(ibin,10);
+    std::cout << "0th blured is skipped " <<std::endl;
   }
 }
 
