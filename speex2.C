@@ -63,9 +63,13 @@ class SinglePEAnalyzer {
   std::shared_ptr<TH1D> fNoiseH1;
   std::shared_ptr<TH1D> fSuminus0;
   double alphaH1;
-  std::vector<double> alpha;
+  std::vector<double> ialpha; //ishida2021の時の毎回変化するalpha
+  std::vector<double> iN0; //fN0 = 1.00 * Noff0 * alpha;
+  std::vector<double> iLambda; // = avePE0 = -log( fN0 / Nonall)
+  //fN1 = fN0 * lambda
   double fN0;
   double fN1;
+  double Noff0;
   double fLambda;
   double fLambda_err_fromN;
   double cLambda; //Lambda calc by <Q_all>(Mean of fSignal) / <Q_1>(Mean of OnePEDist.back() )
@@ -91,7 +95,11 @@ class SinglePEAnalyzer {
   double GetLambda_C() const {return cLambda;}
   double GetLambda_CErr() const {return cLambda_err;}
   double GetAlpha() const {return alphaH1;}
-  double GetAlpha(int i) const {return alpha[i];}
+
+
+  double GetAlpha(int i) const {return ialpha[i];}
+
+
   double GetfN0() const {return fN0;}
   std::shared_ptr<TH1D> GetSignalH1() const { return fSignalH1; }
   std::shared_ptr<TH1D> GetNoiseH1() const { return fNoiseH1; }
@@ -123,6 +131,10 @@ class SinglePEAnalyzer {
   void Iterate(EIterate mode = fN0Iterate_Takahashi2018);
   void Iterate_Takahashi2018();
   void Iterate_Ishida2021();
+  void SetParameter_byAlpha() {
+    iN0.push_back(1.00 * Noff0 * ialpha.back() );
+    iLambda.push_back(-log( fN0 / fSignalH1->Integral()));
+  }
   void OnePEiterate(double N);
   void MakeBlured1PEdist();
   void MakeNPEdist(EMakeNPE mode = kMakeNPE_Takahashi2018);
@@ -213,7 +225,7 @@ void SinglePEAnalyzer::Analyze(int mode) {
   // suminus0 means distribution of N[k>0]
   MakefSuminus0();
 
-  double Noff0 = fNoiseH1->Integral();  // by definition above Eq. (1)
+  Noff0 = fNoiseH1->Integral();  // by definition above Eq. (1)
   fN0 = 1.00 * Noff0 * alphaH1;  // (3)の下らへんに書いてるやつ
   double avePE0 = -log(
       fN0 / Nonall);  // <k> in Eq. (4), initial estimate of Lambda
@@ -279,6 +291,8 @@ void SinglePEAnalyzer::Analyze(int mode) {
     fNPEDist.back()[0]->GetYaxis()->SetRangeUser(0.8,1000);
     fNPEDist.back()[0]->Draw();//1PEを作る為の、fSuminus0から前のiterationの2PE,3PE分布を除いたものが表示
     //Iterate_Ishida2021なら毎回fSuminus0は作り直している
+    OnePEDist.back()->SetFillColor(206);
+    OnePEDist.back()->Draw("same"); //1PE分布のぼかされていない奴
     for (int npe = 1; npe <= kMaxPE; ++npe) fNPEDist.back()[npe]->Draw("same");//NPE分布
     fSignalH1->SetLineColor(6);
     fSignalH1->Draw("same");
@@ -299,9 +313,9 @@ void SinglePEAnalyzer::Analyze(int mode) {
   std::cout << "1PE dist Mean :" << OnePEDist.back()->GetMean() <<" ± " << OnePEDist.back()->GetMeanError() << std::endl;
   std::cout << "1PE dist StdDv:" << OnePEDist.back()->GetStdDev() <<" ± " << OnePEDist.back()->GetStdDevError() << std::endl;
 
-  std::cout <<"check" <<std::endl;
+  std::cout <<"OnePEDist vs blured1PEDist" <<std::endl;
   for (int i = 0; i<=5 ; ++i ) {
-    std::cout << fNPEDist[i][1]->GetMean() << "\t" << OnePEDist[i]->GetMean() <<std::endl;
+    std::cout << "\t" << OnePEDist[i]->GetMean() << "\t" << fNPEDist[i][1]->GetMean() <<std::endl;
   }
 }
 
@@ -358,39 +372,6 @@ void SinglePEAnalyzer::Suminus0_MakeNegativeClean(std::shared_ptr<TH1D> Suminus0
   }  // without it, contents of some bins can become negative number
 }
 
-void SinglePEAnalyzer::Makef0PEdist() {
-  auto n = fNPEDist.size();
-  auto nbins = fSignalH1->GetNbinsX();
-  auto xmin = fSignalH1->GetXaxis()->GetXmin();
-  auto xmax = fSignalH1->GetXaxis()->GetXmax();
-
-  std::cout <<"Makef0PEdist " <<  n << "th" << std::endl;
-
-  f0PEDist.push_back(std::make_shared<TH1D>(Form("0PEDist_%luth",n),";Charge;Entries/bin", nbins, xmin, xmax));
-
-  auto h = f0PEDist.back();
-  MakeBlured1PEdist();
-  std::cout << n <<std::endl;
-  //TODO: ここを1PENoise考慮する
-  if (n !=1){
-    h->Add(fSignalH1.get());
-    //h->Add(Blured1PEDist[n].get(),-1);
-    for (int i = 1 ; i <= kMaxPE; ++i) h->Add(fNPEDist[n-1][i].get(), -1 ); 
-  } else {
-    h->Add(fSignalH1.get());
-  }
-  //以下、alphaの導出
-  auto integrate_negative_charge = [](std::shared_ptr<TH1D> h) {
-    // \Sigma_{-\inf} ^ {-1} n_all(i)
-    return h->Integral(1, h->FindBin(0) - 1);
-  };
-
-  double numerator = integrate_negative_charge(f0PEDist.back());
-  double denominator = integrate_negative_charge(fNoiseH1);
-  alpha.push_back(1.0* numerator / denominator);  // See Eq. (3)
-  std::cout << n <<"th alpha = " << alpha.back() << std::endl;
-}
-
 void SinglePEAnalyzer::Iterate(EIterate mode) {
   // TODO: Fix me for future use
   switch(mode) {
@@ -419,9 +400,9 @@ void SinglePEAnalyzer::Iterate_Takahashi2018() {
         std::make_shared<TH1D>(Form("NPEDist_%dpe_%luth", i, n),
                                ";Charge;Entries/bin", nbins, xmin, xmax));
     fNPEDist.back().back()->SetLineColor(i + 1);
-    if (i == 1) {
-      fNPEDist.back().back()->SetFillColor(2);
-    }
+    // if (i == 1) {
+      // fNPEDist.back().back()->SetFillColor(2);
+    // }
   }
 
   auto h0 = fNPEDist.back()[0];
@@ -454,28 +435,68 @@ void SinglePEAnalyzer::Iterate_Ishida2021() {
         std::make_shared<TH1D>(Form("NPEDist_%dpe_%luth", i, n),
                                ";Charge;Entries/bin", nbins, xmin, xmax));
     fNPEDist.back().back()->SetLineColor(i + 1);
-    if (i == 1) {
-      fNPEDist.back().back()->SetFillColor(2);
-    }
+    // if (i == 1) {
+      // fNPEDist.back().back()->SetFillColor(2);
+    // }
   }
 
   auto h0 = fNPEDist.back()[0];
-
+  Makef0PEdist();
   if (n != 0) {
-    Makef0PEdist();
     h0->Add(fSignalH1.get());
-    h0->Add(fNoiseH1.get(), -1* alpha.back()); //新しいSuminus0分布,まだ汚い
+    h0->Add(fNoiseH1.get(), -1* ialpha.back()); //新しいSuminus0分布,まだ汚い
     Suminus0_MakeNegativeClean(h0);
     for (int npe=2; npe<=kMaxPE; ++npe){
       auto prevNPE = fNPEDist[n - 1][npe].get();
       h0->Add(prevNPE, -1);
     }
   } else {
-    Makef0PEdist();
     h0->Add(fSuminus0.get());
   }
-  OnePEiterate(fN1);  // 4th 1PE distribution 推定
+  //ここのfN1を変える必要がある
+  SetParameter_byAlpha(); //iN0, iLambda決定
+  std::cout << "compare fN0 vs iN1 : " << fN0 << "\t" << iN0.back() * iLambda.back() <<std::endl;
+  OnePEiterate(iN0.back() * iLambda.back() );  // 4th 1PE distribution 推定
   MakeNPEdist(kMakeNPE_Fast_withNoise);      // 4th 2PE,3PE distribution
+}
+
+void SinglePEAnalyzer::Makef0PEdist() {
+  auto n = fNPEDist.size() - 1;
+  auto nbins = fSignalH1->GetNbinsX();
+  auto xmin = fSignalH1->GetXaxis()->GetXmin();
+  auto xmax = fSignalH1->GetXaxis()->GetXmax();
+
+  auto integrate_negative_charge = [](std::shared_ptr<TH1D> h) {
+    // \Sigma_{-\inf} ^ {-1} n_all(i)
+    return h->Integral(1, h->FindBin(0) - 1);
+  };
+
+  std::cout <<"Makef0PEdist " <<  n << "th" << std::endl;
+
+  f0PEDist.push_back(std::make_shared<TH1D>(Form("0PEDist_%luth",n),";Charge;Entries/bin", nbins, xmin, xmax));
+
+  auto h = f0PEDist.back();
+  //MakeBlured1PEdist();
+  
+  if (n != 0){
+    h->Add(fSignalH1.get());
+    std::cout << "fSignal Entry = " << h->Integral() <<std::endl;
+    for (int i = 1 ; i <= kMaxPE; ++i) {
+      h->Add(fNPEDist[n-1][i].get(), -1 ); 
+      std::cout << "without " << i << " or more p.e.s Entry = " << h->Integral() <<std::endl;
+    }
+  } else {
+    h->Add(fSignalH1.get()); //0thのみこちら
+  }
+  //以下、alphaの導出
+  
+
+  double numerator = integrate_negative_charge(f0PEDist.back());
+  double denominator = integrate_negative_charge(fNoiseH1);
+  ialpha.push_back(1.0* numerator / denominator);  // See Eq. (3)
+  std::cout << n <<"th 0PE negative events = " << integrate_negative_charge(f0PEDist.back()) << std::endl; 
+  std::cout << "NoiseH1 negative events = " << integrate_negative_charge(fNoiseH1) << std::endl; 
+  std::cout << n <<"th alpha = " << ialpha.back() << std::endl;
 }
 
 void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
@@ -520,8 +541,12 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
       h[npe]->SetBinContent(ibin, n2i);
     }
   }
+  
+  std::cout << "<Q_k> (k>0) :";
+  for (int i = 1; i <= kMaxPE; ++i) std::cout << "\t" << h[i]->GetMean(); 
+
   if (Blur_with_Noise == true) {
-    for (int npe =2; npe<=kMaxPE; ++npe) {
+    for (int npe = 1; npe<=kMaxPE; ++npe) {
       for (int ibin = 1; ibin <= nbins; ++ibin) {
         int i = ibin - bin0;
         double n2i = 0;
@@ -530,12 +555,15 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
           double n1j = h[npe]->GetBinContent(jbin);
           int i_jbin = i - j + bin0;
           double n1i_j = (1 <= i_jbin && i_jbin <= nbins) ? fNoiseH1->GetBinContent(i_jbin) : 0;
-          n2i += alphaH1 * n1j * n1i_j / fN0; // Eq. (11)
+          n2i +=  n1j * n1i_j / Noff0; 
         }
         h[npe]->SetBinContent(ibin, n2i);
       }
     }
   }
+  std::cout << std::endl << "<Q_k> (k>0) : ";
+  for (int i = 1; i <= kMaxPE; ++i) std::cout << "\t" << h[i]->GetMean(); 
+  std::cout << std::endl << "<Q_Noise> : " << fNoiseH1->GetMean() << std::endl;
 
   std::cout <<"N1 to N"<<kMaxPE<< " is, " <<std::endl;
   for (int i=1; i<=kMaxPE; ++i) std::cout << h[i]->Integral(1,-1) << "\t" ;
@@ -665,6 +693,7 @@ void SinglePEAnalyzer::OnePEiterate(double N) {
 
   OnePEDist.push_back(std::make_shared<TH1D>("hoge","", nbins, xmin, xmax));
   OnePEDist.back().reset((TH1D*)h1->Clone(Form("%luth_1PEDist",fNPEDist.size() - 1 )));
+  OnePEDist.back()->SetFillColor(2);
 
 }
 
@@ -769,7 +798,7 @@ void Savedata_Lamb_and_Charge_withNoiseV(std::shared_ptr<SinglePEAnalyzer> ana,s
     out << '0' ;
   }
 
-  out << std::fixed << std::setprecision(5) << "\t" << file_name[file_name.size() -11] << file_name[file_name.size() - 10] 
+  out << std::fixed << std::setprecision(4) << "\t" << file_name[file_name.size() -11] << file_name[file_name.size() - 10] 
   << "\t" << ana->GetLambda() << "\t" << ana->GetLambdaErr() << "\t" << ana->GetLambda_C() << "\t" << ana->GetLambda_CErr() 
   << "\t" << ana->GetOnePEDist()->Integral(1,-1) << "\t" << ana->GetOnePEDist()->GetMean() << "\t" << ana->GetOnePEDist()->GetMeanError()
   << "\t" << ana->GetOnePEDist()->GetStdDev() << "\t" << ana->GetOnePEDist()->GetStdDevError()
@@ -861,7 +890,7 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
     std::cout << ana2->GetAlpha(i) << std::endl;
   }
 
-  TCanvas *SuminusCan= new TCanvas("SuminusCan","SuminusCan", 1500, 600);
+  TCanvas *SuminusCan= new TCanvas("SuminusCan","SuminusCan(Draw f0PEDist)", 1500, 600);
   SuminusCan->Divide(4, 2, 0.01, 0.01);
   for (int i = 0; i <= 5; ++i) {
     SuminusCan->cd(i+1);
