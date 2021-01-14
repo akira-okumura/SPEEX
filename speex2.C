@@ -359,11 +359,12 @@ void SinglePEAnalyzer::Suminus0_MakeNegativeClean(std::shared_ptr<TH1D> Suminus0
 }
 
 void SinglePEAnalyzer::Makef0PEdist() {
-  std::cout <<"Makef0PEdist" << std::endl;
   auto n = fNPEDist.size();
   auto nbins = fSignalH1->GetNbinsX();
   auto xmin = fSignalH1->GetXaxis()->GetXmin();
   auto xmax = fSignalH1->GetXaxis()->GetXmax();
+
+  std::cout <<"Makef0PEdist " <<  n << "th" << std::endl;
 
   f0PEDist.push_back(std::make_shared<TH1D>(Form("0PEDist_%luth",n),";Charge;Entries/bin", nbins, xmin, xmax));
 
@@ -437,7 +438,7 @@ void SinglePEAnalyzer::Iterate_Takahashi2018() {
     }
   }
   OnePEiterate(fN1);  // 4th 1PE distribution 推定
-  MakeNPEdist(kMakeNPE_Fast);      // 4th 2PE,3PE distribution
+  MakeNPEdist(kMakeNPE_Fast_withNoise);      // 4th 2PE,3PE distribution
 }
 
 void SinglePEAnalyzer::Iterate_Ishida2021() {
