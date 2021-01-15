@@ -66,6 +66,7 @@ class SinglePEAnalyzer {
   std::vector<double> alpha_MH; //ishida2021の時の毎回変化するalpha
   std::vector<double> N0_MH; //fN0 = 1.00 * Noff0 * alpha;
   std::vector<double> fLambda_MH; // = avePE0 = -log( fN0 / Nonall)
+  std::vector<double> cLambda_MH;
   //fN1 = fN0 * lambda
   double fN0;
   double fN1;
@@ -97,8 +98,7 @@ class SinglePEAnalyzer {
 
   double GetAlpha(int i) const {return alpha_MH[i];}
   double GetLambda(int i) const {return fLambda_MH[i];}
-  double GetcLambda(int i) const { return  (fSignalH1->GetMean() - fNoiseH1->GetMean()) / OnePEDist[i]->GetMean() ;}
-
+  double GetcLambda(int i) const { return cLambda_MH[i];}
   double GetfN0() const {return fN0;}
   std::shared_ptr<TH1D> GetSignalH1() const { return fSignalH1; }
   std::shared_ptr<TH1D> GetNoiseH1() const { return fNoiseH1; }
@@ -460,7 +460,11 @@ void SinglePEAnalyzer::Iterate_Ishida2021() {
   //ここのfN1を変える必要がある
   SetParameter_byAlpha(); //N0_MH, fLambda_MH決定
   std::cout << "compare fN0 vs iN1 : " << fN0 << "\t" << N0_MH.back() * fLambda_MH.back() <<std::endl;
-  OnePEiterate(N0_MH.back() * fLambda_MH.back() );  // 4th 1PE distribution 推定
+  if (n != 0) {
+    OnePEiterate(N0_MH.back() * fLambda_MH.back() );  // 4th 1PE distribution 推定
+  } else {
+    OnePEiterate(N0_MH.back() * fLambda_MH.back() ); 
+  }
   MakeNPEdist(kMakeNPE_Fast_withNoise);      // 4th 2PE,3PE distribution
 }
 
@@ -515,6 +519,7 @@ void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
     break;
   case kMakeNPE_Fast_withNoise :
     MakeNPEdistFast(true);
+    break;
   default:
     MakeNPEdistTakahashi2018();
     break;
@@ -598,7 +603,8 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
             << std::endl;
   std::cout << "lambda calc from (-log(fN0/Nonall):(Mean prop) = "<< fLambda << " : "<< fSignalH1->GetMean() / h[1]->GetMean() <<std::endl;
   std::cout << "lambda from entry = " << fLambda << " ± " << fLambda_err_fromN << std::endl;
-  std::cout << "lambda from chage = " << fSignalH1->GetMean() / h[1]->GetMean()  << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h[1]->GetMean(),2) + pow(fSignalH1->GetMean()*h[1]->GetStdDev()/(h[1]->GetMean()*h[1]->GetMean()),2) /h[1]->Integral(1,-1) ) <<std::endl;
+  std::cout << "lambda from chage prime = " << (fSignalH1->GetMean() -fNoiseH1->GetMean()) / GetOnePEDist()->GetMean()  << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h[1]->GetMean(),2) + pow(fSignalH1->GetMean()*h[1]->GetStdDev()/(h[1]->GetMean()*h[1]->GetMean()),2) /h[1]->Integral(1,-1) ) <<std::endl;
+  std::cout << "lambda from chage = " << cLambda_MH.back()  << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h[1]->GetMean(),2) + pow(fSignalH1->GetMean()*h[1]->GetStdDev()/(h[1]->GetMean()*h[1]->GetMean()),2) /h[1]->Integral(1,-1) ) <<std::endl;
   //std::cout << "AmpGaining is " << GetAmpGain() << std::endl; 最終的にこれを見る？
 }
 
@@ -670,7 +676,8 @@ void SinglePEAnalyzer::MakeNPEdistTakahashi2018() {
 
   std::cout << "lambda calc from (-log(fN0/Nonall):(Mean prop) = "<< fLambda << " : "<< fSignalH1->GetMean() / h1->GetMean() <<std::endl;
   std::cout << "lambda from entry = " << fLambda << " ± " << fLambda_err_fromN << std::endl;
-  std::cout << "lambda from chage = " << ( fSignalH1->GetMean() - fNoiseH1->GetMean() )/ GetOnePEDist()->GetMean() << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h1->GetMean(),2) + pow(fSignalH1->GetMean()*h1->GetStdDev()/(h1->GetMean()*h1->GetMean()),2) /h1->Integral(1,-1) ) <<std::endl;
+  std::cout << "lambda from chage prime = " << ( fSignalH1->GetMean() - fNoiseH1->GetMean() )/ GetOnePEDist()->GetMean() << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h1->GetMean(),2) + pow(fSignalH1->GetMean()*h1->GetStdDev()/(h1->GetMean()*h1->GetMean()),2) /h1->Integral(1,-1) ) <<std::endl;
+  std::cout << "lambda from chage = " << cLambda_MH.back()<< " ± " << sqrt( pow(fSignalH1->GetMeanError()/h1->GetMean(),2) + pow(fSignalH1->GetMean()*h1->GetStdDev()/(h1->GetMean()*h1->GetMean()),2) /h1->Integral(1,-1) ) <<std::endl;
   std::cout << "AmpGaining is " << GetAmpGain() << std::endl;
 }
 
@@ -700,7 +707,7 @@ void SinglePEAnalyzer::OnePEiterate(double N) {
   OnePEDist.push_back(std::make_shared<TH1D>("hoge","", nbins, xmin, xmax));
   OnePEDist.back().reset((TH1D*)h1->Clone(Form("%luth_1PEDist",fNPEDist.size() - 1 )));
   OnePEDist.back()->SetFillColor(2);
-
+  cLambda_MH.push_back((fSignalH1->GetMean() - fNoiseH1->GetMean()) /OnePEDist.back()->GetMean());
 }
 
 void SinglePEAnalyzer::MakeBlured1PEdist() {
