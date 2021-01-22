@@ -1,14 +1,16 @@
 /*
-lamb_check.Cでチェック
-root [0] .L okumura1202.C+
-root [1] auto anas = test()　391行目が実行
-これをやると、まず ana で古田さんのデータで先ほどまでと同様に解析します。
-次に、ana2 という instance には MakeMCSpectra を実行することで、
-ana で使用した pedestal と抽出された 1 p.e. 分布を使って、
-電荷分布を乱数で作り直し、これを再度解析しています。
-TCanvas が 2 枚出てきますが、もし 1 枚目の最後の赤分布（ana2 の MC に入れた 1 p.e. 分布）と 
-2 枚目の最後の赤分布（解析結果）が同じ形状になっていれば、入力の真の分布に戻せているということになります。
-今のところ、まだ駄目そうです。
+Nbins = 500;
+Xmax = 311.92;
+Xmin = -88.08;
+Width= 0.8;
+
+//プログラムのミスによって誤差が出てると思われる箇所
+＞Readfile内 //bugcheck 参照
+GetMeanで得られる値は、全てこの0.32だけ大きな値が得られる
+従って、Meanが小さければ小さいほど、この影響は無視できない
+＞MakeNPEdistのN0
+iterationでn.p.e.分布を作る際、分母に最初に導出したfN0を用いている
+しかし、N0を変化させるならここも変わるはず
 */
 
 
@@ -45,7 +47,7 @@ std::cout << x << std::endl;
 #include <utility>
 #include <fstream> // include for Savedata_Lamb()
 
-
+//TODO:Simulationを作る
 
 double integrateUpToMinusOne(std::shared_ptr<TH1D> h) {
   // used for e.g. \Sigma_{-\inf} ^ {-1} n_all(i)
@@ -63,6 +65,7 @@ class SinglePEAnalyzer {
   std::shared_ptr<TH1D> fSignalH1;
   std::shared_ptr<TH1D> fNoiseH1;
   std::shared_ptr<TH1D> fSuminus0;
+  std::shared_ptr<TH1D> Simulation_OnePEdist;
   double alphaH1;
   std::vector<double> alpha_MH; //ishida2021の時の毎回変化するalpha
   std::vector<double> N0_MH; //fN0 = 1.00 * Noff0 * alpha;
@@ -76,6 +79,7 @@ class SinglePEAnalyzer {
   double fLambda_err_fromN;
   double cLambda; //Lambda calc by <Q_all>(Mean of fSignal) / <Q_1>(Mean of OnePEDist.back() )
   double cLambda_err;
+  std::vector<double> suminus0_negativecontents_upperthansigma;
 
   std::vector<std::vector<std::shared_ptr<TH1D>>> fNPEDist;
   std::vector<std::shared_ptr<TH1D>> f0PEDist; //Iterate_Ishidaで毎回作るfSuminus0のこと
@@ -102,6 +106,13 @@ class SinglePEAnalyzer {
   double GetLambdaErr(int i) const {return sqrt((1-alpha_MH[i])/fN0);}
   double GetcLambda(int i) const { return cLambda_MH[i];}
   double GetcLambdaErr(int i) const { return sqrt( pow((fSignalH1->GetMeanError() - fNoiseH1->GetMeanError())/OnePEDist[i]->GetMean(),2) + pow((fSignalH1->GetMean() - fNoiseH1->GetMean() )*OnePEDist[i]->GetStdDev()/(OnePEDist[i]->GetMean()*OnePEDist[i]->GetMean()),2) /OnePEDist[i]->Integral(1,-1) ); }
+  void PrintAllLambdas() {
+    std::cout << "fLambda_MH:" ;
+    for (int i=0; i<=5;++i) {std::cout << fLambda_MH[i] << " " ;}
+    std::cout << std::endl << "cLambda_MH:" ;
+    for (int i=0; i<=5;++i) {std::cout << cLambda_MH[i] << " " ;}
+    std::cout <<std::endl;
+  }
   double GetfN0() const {return fN0;}
   std::shared_ptr<TH1D> GetSignalH1() const { return fSignalH1; }
   std::shared_ptr<TH1D> GetNoiseH1() const { return fNoiseH1; }
@@ -122,6 +133,13 @@ class SinglePEAnalyzer {
     }
     return nullptr;
   }
+  std::shared_ptr<TH1D> GetSimOnePEDist() const {
+    if (Simulation_OnePEdist==nullptr) {
+      return nullptr;
+    } else {
+      return Simulation_OnePEdist;
+    }
+  }
   std::shared_ptr<TH1D> GetOnePEDist(int i) const {return OnePEDist[i];}
   std::shared_ptr<TH1D> Getf0PEDist(int n) const { return f0PEDist[n]; }
   void Analyze(int mode = 0);
@@ -139,11 +157,11 @@ class SinglePEAnalyzer {
     fLambda_MH.push_back(-log( N0_MH.back() / fSignalH1->Integral()));
   }
   void OnePEiterate(double N);
-  void MakeBlured1PEdist();
   void MakeNPEdist(EMakeNPE mode = kMakeNPE_Takahashi2018);
   void MakeNPEdistTakahashi2018();
   void MakeNPEdistFast(bool Blur_with_Noise = false);
-  void CompareLambda_E_to_C();
+  void CompareLambda_takahashi();
+  void CompareLambda_ishida();
   void Savedata_Lamb();
   double GetAmpGain();
 };
@@ -166,12 +184,31 @@ void SinglePEAnalyzer::ReadFile(const std::string& file_name,
   fNoiseH1.reset((TH1D*)f.Get(noise_name.c_str())->Clone("h1_noise"));
   fSignalH1->SetDirectory(directory);
   fNoiseH1->SetDirectory(directory);
-
   if(rebin > 1){
     fSignalH1->Rebin(rebin);
     fNoiseH1->Rebin(rebin);
   }
+  if (file_name[0]=='S') {
+    std::cout << " Got Simulation OnePE dist. "<< std::endl;
+    Simulation_OnePEdist.reset((TH1D*)f.Get("OnePE")->Clone("h1_simOnePE"));
+    Simulation_OnePEdist->SetDirectory(directory);
+    Simulation_OnePEdist->SetLineColor(7);
+    if(rebin > 1) Simulation_OnePEdist->Rebin(rebin);
+  }
+  std::cout << fSignalH1->GetNbinsX() << "\t" <<fSignalH1->GetXaxis()->GetXmax() << "\t" << fSignalH1->GetXaxis()->GetXmin() <<std::endl;
   f.Close();
+
+  //bugcheck
+  int check_bin = fSignalH1->FindBin(0);
+  std::cout << "0bin is " << check_bin << std::endl; //111
+  std::cout << "check_bin value is " << fSignalH1->GetBinCenter(check_bin)<<std::endl; //0.32
+  std::cout << "bin width is " << fSignalH1->GetBinWidth(1) << std::endl;
+
+  /*
+  GetMeanで得られる値は、全てこの0.32だけ大きな値が得られる
+  従って、Meanが小さければ小さいほど、この影響は無視できない
+  */
+
 }
 
 void SinglePEAnalyzer::MakeMCSpectra(std::shared_ptr<TH1D> noise, std::shared_ptr<TH1D> singlePE, double lambda, int nevents, bool ignorePedestalConvolution) {
@@ -211,8 +248,6 @@ void SinglePEAnalyzer::MakeMCSpectra(std::shared_ptr<TH1D> noise, std::shared_pt
 
 void SinglePEAnalyzer::Analyze(int mode) {
   // main method
-  std::cout << "fSignalMean is " << fSignalH1->GetMean() << "±" << fSignalH1->GetMeanError() <<std::endl;
-
   fCanvas = std::make_shared<TCanvas>("can", "can", 2400, 800);
   fCanvas->Divide(4, 2, 1e-10, 1e-10);
   if (!fNoiseH1 || !fSignalH1) {
@@ -221,21 +256,22 @@ void SinglePEAnalyzer::Analyze(int mode) {
               << std::endl;
     return;
   }
+  std::cout << "fSignalMean is " << fSignalH1->GetMean() << "±" << fSignalH1->GetMeanError() <<std::endl;
+  std::cout << " fNoiseMean is " << fNoiseH1->GetMean() << "±" << fNoiseH1->GetMeanError() <<std::endl;
+
   auto xmin = fSignalH1->GetXaxis()->GetXmin();
   auto xmax = fSignalH1->GetXaxis()->GetXmax();
   auto binwidth = fSignalH1->GetXaxis()->GetBinWidth(1);
+  auto Nonall = fSignalH1->Integral(1, -1); 
+  auto Noffall = fNoiseH1->Integral(1, -1);
+  auto nbins = (xmax - xmin) / binwidth;
 
   // TODO: the charge offset (= binwidth / 2 here) should be automatically
   // calculated from the pedestal histogram
   double aveQ = fSignalH1->GetMean() + binwidth / 2;
-
-  auto Nonall = fSignalH1->Integral(1, -1);
-  auto Noffall = fNoiseH1->Integral(1, -1);
-  auto nbins = (xmax - xmin) / binwidth;
   fSignalH1->SetLineColor(5);//yellow
 
-  // suminus0 means distribution of N[k>0]
-  MakefSuminus0();
+  MakefSuminus0(); // suminus0 is distribution of N[k>0]
 
   Noff0 = fNoiseH1->Integral();  // by definition above Eq. (1)
   fN0 = 1.00 * Noff0 * alphaH1;  // (3)の下らへんに書いてるやつ
@@ -244,10 +280,12 @@ void SinglePEAnalyzer::Analyze(int mode) {
                       // NallとN0から<k>が推定可能なので、N0の推定のみで決まる
   fN1 = fN0 * avePE0;
   fLambda = avePE0;
+  fLambda_err_fromN = sqrt((1-alphaH1)/fN0);
+
+  //takahashi methodのパラメータ
   std::cout << "Noff0 = " << Noff0 <<std::endl;
   std::cout << "alphaH1 = " << alphaH1 << std::endl;
   std::cout << "fN0 = Noff0 * alphaH1 = " << fN0 << std::endl;
-  fLambda_err_fromN = sqrt((1-alphaH1)/fN0);
   std::cout << "lambda calc from -log(fN0/Nonall) = " << fLambda << " ± " << fLambda_err_fromN << std::endl;
 
   double Noff0_r = 2 * integrateUpToMinusOne(fNoiseH1);
@@ -255,18 +293,18 @@ void SinglePEAnalyzer::Analyze(int mode) {
   double Non0_r = 2 * integrateUpToMinusOne(fSignalH1);
   double lambda_signal = -log(Non0_r / Nonall);
   double fLambda_r = lambda_signal - lambda_noise ;
-  
+
+  //ishida method のパラメータ
   std::cout << "Noff0_r = " << Noff0 <<std::endl;
   std::cout << "alpha_r:" << double(Non0_r / Noff0_r ) <<std::endl;
   std::cout << "fN0_r = Noff0_r * alpha_r =  " << Non0_r << std::endl;
-
   std::cout << "lambda calc from -log(Non0_r/Nonall) + log(Noff0_r/Noffall) = "
   << lambda_signal << " - " << lambda_noise << " = " << fLambda_r << std::endl;
   //-log(Non0_r/Nonall) + log(Noff0_r/Noffall)から導出するlambdaが一致する
+
   std::cout << "entries check : signal / noise / suminus0" <<std::endl;
   std::cout << "                " << fSignalH1->Integral() << "\t" << fNoiseH1->Integral() << "\t" << fSuminus0->Integral() << std::endl;
-  std::cout <<"lambda by ln(Nall/N0) = " <<log(fSignalH1->Integral() / (fSignalH1->Integral() - fSuminus0->Integral())) <<std::endl;
-
+  
   double Q1_8_err; //p12のdelta<Q1>_(8)
   for (int i = 1; i < fSignalH1->FindBin(0); ++i) {
     Q1_8_err += pow((xmin + binwidth * i) * avePE0 + aveQ, 2);
@@ -286,7 +324,6 @@ void SinglePEAnalyzer::Analyze(int mode) {
   
   //iterationはここから
   for (int i = 0; i <= iteration_times; ++i) { //iterateは0thから5thまで
-    if (i <= 5) {
     switch (mode) {
     case 0:
       Iterate(fN0Iterate_Takahashi2018);
@@ -297,9 +334,6 @@ void SinglePEAnalyzer::Analyze(int mode) {
     default:
       Iterate(fN0Iterate_Takahashi2018);
       break;
-    }
-    } else {
-      Iterate(fN0Iterate_Takahashi2018);
     }
 
     fCanvas->cd(i + 2);
@@ -316,14 +350,11 @@ void SinglePEAnalyzer::Analyze(int mode) {
 
   //cLambda = fSignalH1->GetMean() / OnePEDist.back()->GetMean() ;
   //cLambda_err =sqrt( pow(fSignalH1->GetMeanError()/OnePEDist.back()->GetMean(),2) + pow(fSignalH1->GetMean()*OnePEDist.back()->GetStdDev()/(OnePEDist.back()->GetMean()*OnePEDist.back()->GetMean()),2) /OnePEDist.back()->Integral(1,-1) );
-  cLambda =  (fSignalH1->GetMean() - fNoiseH1->GetMean()) / OnePEDist.back()->GetMean();
-  cLambda_err =sqrt( pow((fSignalH1->GetMeanError() - fNoiseH1->GetMeanError())/OnePEDist.back()->GetMean(),2) + pow((fSignalH1->GetMean() - fNoiseH1->GetMean() )*OnePEDist.back()->GetStdDev()/(OnePEDist.back()->GetMean()*OnePEDist.back()->GetMean()),2) /OnePEDist.back()->Integral(1,-1) );
-  CompareLambda_E_to_C(); //lambdaを出す二つの方法で違いが出ないかチェック
-  std::cout << "ANS lambda from entry  :" << fLambda <<" ± " << fLambda_err_fromN  << std::endl;
-  std::cout << "ANS lambda from charge :" << cLambda <<" ± " << cLambda_err << std::endl;
+  // cLambda =  (fSignalH1->GetMean() - fNoiseH1->GetMean()) / OnePEDist.back()->GetMean();
+  // cLambda_err =sqrt( pow((fSignalH1->GetMeanError() - fNoiseH1->GetMeanError())/OnePEDist.back()->GetMean(),2) + pow((fSignalH1->GetMean() - fNoiseH1->GetMean() )*OnePEDist.back()->GetStdDev()/(OnePEDist.back()->GetMean()*OnePEDist.back()->GetMean()),2) /OnePEDist.back()->Integral(1,-1) );
   std::cout << "fSignalMean(平均電荷量) is " << fSignalH1->GetMean() << "±" << fSignalH1->GetMeanError() <<std::endl;
-  std::cout << "fSuminusMean(平均電荷量) is " << fSuminus0->GetMean() << "±" << fSuminus0->GetMeanError() <<std::endl;
-  std::cout << "fcollectMean(平均電荷量) is " << (fSignalH1->GetMean() - fNoiseH1->GetMean())  << "±" << fSuminus0->GetMeanError() <<std::endl;
+  std::cout << "fNoise Mean(平均電荷量) is " << fNoiseH1->GetMean() << "±" << fNoiseH1->GetMeanError() <<std::endl;
+  std::cout << "fChargeMean(平均電荷量) is " << (fSignalH1->GetMean() - fNoiseH1->GetMean())  << "±" << sqrt(pow(fSignalH1->GetMeanError(),2)+pow(fNoiseH1->GetMeanError(),2)) <<std::endl;
   std::cout << "1PE分布に関する情報" << std::endl; 
   std::cout << "1PE dist Entry:" << OnePEDist.back()->Integral(1,-1) << std::endl;
   std::cout << "1PE dist Mean :" << OnePEDist.back()->GetMean() <<" ± " << OnePEDist.back()->GetMeanError() << std::endl;
@@ -333,6 +364,11 @@ void SinglePEAnalyzer::Analyze(int mode) {
   for (int i = 0; i<=5 ; ++i ) {
     std::cout << "\t" << OnePEDist[i]->GetMean() << "\t" << fNPEDist[i][1]->GetMean() <<std::endl;
   }
+  std::cout << "upperthansigma_negative_contents" << std::endl;
+  for (double i :suminus0_negativecontents_upperthansigma) {
+    std::cout << i << "  " ; 
+  }
+  std::cout << std::endl;
 }
 
 void SinglePEAnalyzer::MakefSuminus0() {
@@ -347,7 +383,8 @@ void SinglePEAnalyzer::MakefSuminus0() {
   alphaH1 = 1.0* numerator / denominator;  // See Eq. (3)
   fSuminus0->Add(fNoiseH1.get(),
                  -1 * alphaH1);  // n_{k > 0}(i) = n_all(i) - n_0(i) 
-
+  std::cout << "MakefSuminus0"<<std::endl;
+  std::cout << "alphaH1 = " << numerator <<"/"<< denominator << " = " << alphaH1 <<std::endl;
   Suminus0_MakeNegativeClean(fSuminus0);
   fSuminus0->SetFillColor(1);
 }
@@ -357,11 +394,11 @@ void SinglePEAnalyzer::Suminus0_MakeNegativeClean(std::shared_ptr<TH1D> Suminus0
   // 0回りを整理する。fNoiseH1->GetStdDev()よりシグマの範囲を同じびんに放り込む
   // 1.5σの範囲にするかどうかは議論の余地がある
   double fNoiseH1_sigma = fNoiseH1->GetStdDev();
-  printf("fNoiseH1 StdDev is %f\n", fNoiseH1_sigma);
-  printf("this is %d bins (0bin is %d)\n", fNoiseH1->FindBin(fNoiseH1_sigma),
-         fNoiseH1->FindBin(0));
-
-  double together_bin_charge = 1;
+  double fNoiseH1_sigma_bin = fNoiseH1->FindBin(fNoiseH1_sigma);
+  std::cout << "MakeNegativeClean" << std::endl;
+  std::cout << "fNoiseH1 StdDev = " << fNoiseH1_sigma << " (" << fNoiseH1_sigma_bin << " bin) 0pC bin is " << fNoiseH1->FindBin(0) <<"bin"<<std::endl;
+  
+  double together_bin_charge = 0;
   int together_bin = 1; // = fSuminus->FindBin(together_bin_charge);
   double together_bin_content = 0;
   double together_bin_numerator = 0;    // bunshi
@@ -375,19 +412,59 @@ void SinglePEAnalyzer::Suminus0_MakeNegativeClean(std::shared_ptr<TH1D> Suminus0
       together_bin_numerator +=
           Suminus0->GetBinContent(i) * fNoiseH1->GetBinCenter(i);
       Suminus0->SetBinContent(i, 0);
-    }
+    } 
   }
   together_bin_charge = (together_bin_numerator / together_bin_denominator);
   together_bin = Suminus0->FindBin(together_bin_charge);
 
+  printf("together bin charge is %f \n",together_bin_charge);
   printf("%f / %f so, toukeigosa_matomete_ireru_together_bin is %d \n",
          together_bin_numerator, together_bin_denominator, together_bin);
   printf("content is %f \n", together_bin_content);
+  
+  /*
+  ここのpedestalのσ1までの範囲は統計誤差を考慮して一つのbinにまとめるという操作は、
+  0pCまでの範囲にするとαの導出方法より分母の値が0となるので適用できない。
+  また、この操作は
+  >そもそもこの操作の必然性が不明
+  >NoiseがPedestalでない時はσが大きすぎて適用できない
+  >同様に、Gainが低くても相対的にσが大きすぎて適用できない
+  >統計誤差によりマイナスのbinが発生してしまう問題は、αの値がiterationを経て小さくなっていくishida methodで発生しづらい
+  などの理由から、採用していない
+
+  採用する場合は、Suminus0_MakeNegativeCleanの引数 ignore　をtrueにする（defaultはfalse)
+  */
+
   if (ignore == true) { Suminus0->SetBinContent(together_bin, together_bin_content);}
-  //
-  for (int i = 1; i <= fNoiseH1->GetNbinsX() / 2; ++i) {
-    if (Suminus0->GetBinContent(i) < 0) Suminus0->SetBinContent(i, 0);
-  }  // without it, contents of some bins can become negative number
+
+  //Suminus0でnegative contentsを回避するおまじない
+  std::cout << "negative contents cleaner : result "<< std::endl;
+  double total_negative_entries_uppersigma = 0 ;
+  for (int i = 1; i <= fNoiseH1->GetNbinsX() ; ++i) {
+    double icontent = Suminus0->GetBinContent(i);
+    if (icontent < 0) {
+      if (i <= fNoiseH1_sigma_bin) {
+        std::cout << i << "(" << icontent << ")  " ;
+      } else {
+        total_negative_entries_uppersigma += icontent;
+      }
+      Suminus0->SetBinContent(i, 0);
+    } 
+  }
+  std::cout << "upper than sigma(bin" << fNoiseH1_sigma_bin << ") total is " << total_negative_entries_uppersigma << std::endl;
+  suminus0_negativecontents_upperthansigma.push_back(total_negative_entries_uppersigma);
+  //01/21 追加したが数学的に正しいかわからない
+  std::cout << Suminus0->Integral() << std::endl; 
+  double upperthansigma_multiple = 1 -1*suminus0_negativecontents_upperthansigma.back() / Suminus0->Integral() ;
+  std::cout << "sumins_negativehosei multiple is " << upperthansigma_multiple << std::endl;
+  /*
+  if (total_negative_entries_uppersigma !=0) {
+    for (int i = 1; i <= fNoiseH1->GetNbinsX() ; ++i) {
+      double content_ibins = Suminus0->GetBinContent(i);
+      Suminus0->SetBinContent(i, content_ibins*upperthansigma_multiple);
+    }
+  }
+  */
 }
 
 void SinglePEAnalyzer::Iterate(EIterate mode) {
@@ -445,7 +522,7 @@ void SinglePEAnalyzer::Iterate_Ishida2021() {
   auto nbins = fSignalH1->GetNbinsX();
   auto xmin = fSignalH1->GetXaxis()->GetXmin();
   auto xmax = fSignalH1->GetXaxis()->GetXmax();
-  std::cout << "Now 2021iteration is " << n << std::endl;
+  std::cout << "Now " << n << "th iteration(ishida method)" << std::endl;
 
   fNPEDist.push_back(std::vector<std::shared_ptr<TH1D>>());
   for (int i = 0; i <= kMaxPE; ++i) {
@@ -453,34 +530,39 @@ void SinglePEAnalyzer::Iterate_Ishida2021() {
         std::make_shared<TH1D>(Form("NPEDist_%dpe_%luth", i, n),
                                ";Charge;Entries/bin", nbins, xmin, xmax));
     fNPEDist.back().back()->SetLineColor(i + 1);
-    // if (i == 1) {
-      // fNPEDist.back().back()->SetFillColor(2);
-    // }
   }
 
   auto h0 = fNPEDist.back()[0];
-  Makef0PEdist();
+  Makef0PEdist();//alpha_MHもここで決定
+  SetParameter_byAlpha(); //N0_MH, fLambda_MH決定
   if (n != 0) {
     h0->Add(fSignalH1.get());
     h0->Add(fNoiseH1.get(), -1* alpha_MH.back()); //新しいSuminus0分布,まだ汚い
-    Suminus0_MakeNegativeClean(h0);
     for (int npe=2; npe<=kMaxPE; ++npe){
       auto prevNPE = fNPEDist[n - 1][npe].get();
       h0->Add(prevNPE, -1);
     }
+    Suminus0_MakeNegativeClean(h0);
   } else {
     h0->Add(fSuminus0.get());
   }
   //ここのfN1を変える必要がある
-  SetParameter_byAlpha(); //N0_MH, fLambda_MH決定
-  std::cout << "compare fN0 vs iN1 : " << fN0 << "\t" << N0_MH.back() * fLambda_MH.back() <<std::endl;
+  std::cout << n <<"th iterate using parameter ";
+  std::cout << "alpha_MH = " << GetAlpha(n) << std::endl;
+  std::cout << "N0_MH(by alpha_MH) = " << N0_MH.back() << std::endl;
+  std::cout << "fLambda_MH = " << fLambda_MH.back() << std::endl;
+  std::cout << "N1 = N0 * fLambda = " << N0_MH.back() * fLambda_MH.back() <<std::endl;
   std::cout << n <<"th iterate use ";
-  if (n != 0) {
+  //1/21 memo: 初回のみfLambdaを使用し、以降はcLmabdaを使用する手法を用いていたが、それだと収束しない気がする
+  //初回のみ~をやる時は if (n != 0) に変える
+  if (n == 100) {
+    // 真の1PE distribution 推定 by clambda
     std::cout << "cLambda = " << cLambda_MH.back() <<std::endl;
-    OnePEiterate(N0_MH.back() * cLambda_MH.back() ); // 真の1PE distribution 推定 前回のcLambdaを採用する
+    OnePEiterate(N0_MH.back() * cLambda_MH.back() );
   } else {
-    std::cout << "fLambda = " << fLambda_MH.back() <<std::endl;
-    OnePEiterate(N0_MH.back() * fLambda_MH.back() );  // 真の1PE distribution 推定. 0thは前回のcLambdaが存在しないのでfLambdaから推定
+    // 真の1PE distribution 推定 by fLambda 0thは前回のcLambdaが存在しないのでfLambdaから推定
+    std::cout << "fLambda" <<std::endl;
+    OnePEiterate(N0_MH.back() * fLambda_MH.back() );  
   }
   MakeNPEdist(kMakeNPE_Fast_withNoise);      //n.p.e. (n>1) distribution with blur
 }
@@ -497,9 +579,7 @@ void SinglePEAnalyzer::Makef0PEdist() {
   };
 
   std::cout <<"Makef0PEdist " <<  n << "th" << std::endl;
-
   f0PEDist.push_back(std::make_shared<TH1D>(Form("0PEDist_%luth",n),";Charge;Entries/bin", nbins, xmin, xmax));
-
   auto h = f0PEDist.back();
    
   if (n != 0){
@@ -510,19 +590,16 @@ void SinglePEAnalyzer::Makef0PEdist() {
       std::cout << "without " << i << " or more p.e.s Entry = " << h->Integral() <<std::endl;
     }
   } else {
-    h->Add(fSignalH1.get()); //0thのみこちら
+    h->Add(fSignalH1.get()); //0thのみこちら。MakefSuminus0で作成したfSignalH1をコピーしてくる
   }
-  //以下、alphaの導出
 
-  // for (int ibin = 1; ibin <= nbins; ++ibin) {
-    // if (h->GetBinContent(ibin) < 0) h->SetBinContent(ibin,0) ;
-  // }
-  double numerator = integrate_negative_charge(f0PEDist.back());
-  double denominator = integrate_negative_charge(fNoiseH1);
-  alpha_MH.push_back(1.0* numerator / denominator);  // See Eq. (3)
-  std::cout << n <<"th 0PE negative events = " << integrate_negative_charge(f0PEDist.back()) << std::endl; 
-  std::cout << "NoiseH1 negative events = " << integrate_negative_charge(fNoiseH1) << std::endl; 
-  std::cout << n <<"th alpha = " << alpha_MH.back() << std::endl;
+  //以下、alphaの導出
+  double numerator_alphaMH = integrate_negative_charge(f0PEDist.back());
+  double denominator_alphaMH = integrate_negative_charge(fNoiseH1);
+  alpha_MH.push_back(1.0* numerator_alphaMH / denominator_alphaMH );  // See Eq. (3)
+  std::cout << n <<"th 0PE negative events = " << numerator_alphaMH << std::endl; 
+  std::cout << "NoiseH1 negative events = " << denominator_alphaMH << std::endl; 
+  std::cout << n <<"th alpha = " << alpha_MH.back() << std::endl; //0thはalphaH1と一致する
 }
 
 void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
@@ -547,6 +624,18 @@ void SinglePEAnalyzer::MakeNPEdist(EMakeNPE mode) {
 void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
   // TODO: implement me
   // 12/11　ishida implemented you
+
+  double denominator_N0 = 1; //fN0とfN0で分岐が必要になったので作った _MHをempty()で存在確認して分岐
+  if (N0_MH.empty()) {
+    std::cout << "N0_MH is empty. You're using Takahashi Method"<< std::endl;
+    std::cout << "N0 for denominator is " << fN0 << std::endl;
+    denominator_N0 = fN0;
+  } else {
+    std::cout << "N0_MH is exist You're using Ishida Method"<< std::endl;
+    std::cout << "N0 for denominator is " << N0_MH.back() << std::endl;
+    denominator_N0 = N0_MH.back();
+  }
+  //ToDo: 01/21 この関数内のfN0をdenominator_fN0に変える
   
   std::vector<std::shared_ptr<TH1D>> h{};
   for (int i=0; i<=kMaxPE; ++i) h.push_back(fNPEDist.back()[i]);
@@ -563,7 +652,7 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
         double n1j = h[npe-1]->GetBinContent(jbin);
         int i_jbin = i - j + bin0;
         double n1i_j = (1 <= i_jbin && i_jbin <= nbins) ? h[1]->GetBinContent(i_jbin) : 0;
-        n2i += (n1j * n1i_j) / (npe * fN0); // Eq. (11)
+        n2i += (n1j * n1i_j) / (npe * denominator_N0); // Eq. (11)
       }
       h[npe]->SetBinContent(ibin, n2i);
     }
@@ -594,9 +683,15 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
   for (int i = 1; i <= kMaxPE; ++i) std::cout << "\t" << h[i]->GetMean(); 
   std::cout << std::endl << "<Q_Noise> : " << fNoiseH1->GetMean() << std::endl;
 
-  std::cout <<"N1 to N"<<kMaxPE<< " is, " <<std::endl;
+  std::cout <<"N0 to N"<<kMaxPE<< " is, " <<std::endl;
+  if (N0_MH.empty()) {
+    std::cout << fN0 << "\t";
+  } else {
+    std::cout << N0_MH.back() << "\t";
+  }
   for (int i=1; i<=kMaxPE; ++i) std::cout << h[i]->Integral(1,-1) << "\t" ;
   std::cout << std::endl;
+  
   double Q1mean_7 = 0;
   auto xmin = fSignalH1->GetXaxis()->GetXmin();
   auto binwidth = fSignalH1->GetXaxis()->GetBinWidth(1);
@@ -619,8 +714,6 @@ void SinglePEAnalyzer::MakeNPEdistFast(bool Blur_with_Noise) {
 
   std::cout << h[1]->GetName() << "'s <Q1>(7)error is " << Q1mean_7err
             << std::endl;
-  std::cout << "lambda calc from (-log(fN0/Nonall):(Mean prop) = "<< fLambda << " : "<< fSignalH1->GetMean() / h[1]->GetMean() <<std::endl;
-  std::cout << "lambda from entry = " << fLambda << " ± " << fLambda_err_fromN << std::endl;
   std::cout << "lambda from chage = " << cLambda_MH.back()  << " ± " << sqrt( pow(fSignalH1->GetMeanError()/h[1]->GetMean(),2) + pow(fSignalH1->GetMean()*h[1]->GetStdDev()/(h[1]->GetMean()*h[1]->GetMean()),2) /h[1]->Integral(1,-1) ) <<std::endl;
   //std::cout << "AmpGaining is " << GetAmpGain() << std::endl; 最終的にこれを見る？
 }
@@ -699,7 +792,7 @@ void SinglePEAnalyzer::MakeNPEdistTakahashi2018() {
 
 void SinglePEAnalyzer::OnePEiterate(double N) {
   //fNPEDist[k][1]に1PE分布を作成し、同様の分布をOnePEDist[k]にも作成する。
-  //1PEにBlurをかけるので真の1PEDistはOnePEDist[k]を使う。
+  //MakeNPEdistにて1PEにBlurをかけるので真の1PEDistはOnePEDist[k]を使う。
   double sum = 0;
   auto h0 = fNPEDist.back()[0];
   auto h1 = fNPEDist.back()[1];
@@ -723,41 +816,14 @@ void SinglePEAnalyzer::OnePEiterate(double N) {
   OnePEDist.push_back(std::make_shared<TH1D>("hoge","", nbins, xmin, xmax));
   OnePEDist.back().reset((TH1D*)h1->Clone(Form("%luth_1PEDist",fNPEDist.size() - 1 )));
   OnePEDist.back()->SetFillColor(2);
-  cLambda_MH.push_back((fSignalH1->GetMean() - fNoiseH1->GetMean()) /OnePEDist.back()->GetMean());
-}
-//使っていない
-void SinglePEAnalyzer::MakeBlured1PEdist() {
-
-  int nbins = fNoiseH1->GetNbinsX();
-  auto xmin = fNoiseH1->GetXaxis()->GetXmin();
-  auto xmax = fNoiseH1->GetXaxis()->GetXmax();
-  int bin0 = fNoiseH1->FindBin(0);
-  auto h1 = fNPEDist.back()[1];
-
-
-  Blured1PEDist.push_back(std::make_shared<TH1D>(Form("Blured1PEDist_%luth",fNPEDist.size()),";Charge;Entries/bin", nbins, xmin, xmax));
-  auto h = Blured1PEDist.back();
-  std::cout << Blured1PEDist.size() - 1 << "th blured" <<std::endl;
-  if (Blured1PEDist.size() != 1) {
-    for (int ibin = 1; ibin <= nbins; ++ibin) {
-      int i = ibin - bin0;
-      double n2i = 0;
-      for (int jbin = 1; jbin <= nbins; ++jbin) {
-        int j = jbin - bin0;
-        double n1j = h1->GetBinContent(jbin);
-        int i_jbin = i - j + bin0;
-        double n1i_j = (1 <= i_jbin && i_jbin <= nbins) ? fNoiseH1->GetBinContent(i_jbin) : 0;
-        n2i += alphaH1 * n1j * n1i_j / fN0; // Eq. (11)
-      }
-      h->SetBinContent(ibin, n2i);
-    }
-  } else {
-    for (int ibin=1; ibin<=nbins; ++ibin) h->SetBinContent(ibin,10);
-    std::cout << "0th blured is skipped " <<std::endl;
-  }
+  cLambda_MH.push_back((fSignalH1->GetMean() - fNoiseH1->GetMean()) /(OnePEDist.back()->GetMean()-0.32));
+  std::cout << "cLambdaにおける0.32誤差の影響　"<< std::endl;
+  std::cout << (fSignalH1->GetMean() - fNoiseH1->GetMean()) /(OnePEDist.back()->GetMean()) << "\t" 
+  <<  (fSignalH1->GetMean() - fNoiseH1->GetMean()) /(OnePEDist.back()->GetMean()-0.32) <<std::endl;
+  //cLambda_MHの計算において0.32の数値の誤差を考慮している
 }
 
-void SinglePEAnalyzer::CompareLambda_E_to_C() {
+void SinglePEAnalyzer::CompareLambda_takahashi() {
   //compare_flambda : cLambda;
   std::cout << "lambdaを出す二つの方法で違いが出ないかチェック" <<std::endl;
   std::cout << "fLambda,cLambda = " << fLambda << ", " << cLambda << std::endl;
@@ -773,6 +839,28 @@ void SinglePEAnalyzer::CompareLambda_E_to_C() {
     ++number_of_N;
     NPE_Entry_E *= double(fLambda/number_of_N);
     NPE_Entry_C *= double(cLambda/number_of_N);
+  } while ( NPE_Entry_E > 1 || NPE_Entry_C > 1 || number_of_N < 10 );
+  std::cout << "from Entries:Total Entries calc PE0 to PE" << number_of_N-1 <<"  is " << Total_Entries_E << std::endl;
+  std::cout << "from Charge :Total Entries calc PE0 to PE" << number_of_N-1 <<"  is " << Total_Entries_C << std::endl;
+  std::cout << "Total Entries calc from fSignal->Integral() is " << fSignalH1->Integral(1,-1) << std::endl;
+}
+
+void SinglePEAnalyzer::CompareLambda_ishida() {
+  //compare_flambda : cLambda;
+  std::cout << "lambdaを出す二つの方法で違いが出ないかチェック" <<std::endl;
+  std::cout << "fLambda,cLambda = " << fLambda_MH.back() << ", " << cLambda_MH.back() << std::endl;
+  int number_of_N = 0;
+  double Total_Entries_E = 0;
+  double Total_Entries_C = 0;
+  double NPE_Entry_E = N0_MH.back();
+  double NPE_Entry_C = N0_MH.back();
+  do {
+    Total_Entries_E += NPE_Entry_E;
+    Total_Entries_C += NPE_Entry_C;
+    std::cout << "N"<< number_of_N <<": " << NPE_Entry_E <<"\t"<< NPE_Entry_C << std::endl;
+    ++number_of_N;
+    NPE_Entry_E *= double(fLambda_MH.back()/number_of_N);
+    NPE_Entry_C *= double(cLambda_MH.back()/number_of_N);
   } while ( NPE_Entry_E > 1 || NPE_Entry_C > 1 || number_of_N < 10 );
   std::cout << "from Entries:Total Entries calc PE0 to PE" << number_of_N-1 <<"  is " << Total_Entries_E << std::endl;
   std::cout << "from Charge :Total Entries calc PE0 to PE" << number_of_N-1 <<"  is " << Total_Entries_C << std::endl;
@@ -864,6 +952,7 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   //ReadFileでfileから取得→Rebinまでやってる
   ana->SetkMaxPE(Iteration_MaxPE);
   ana->Analyze();
+  ana->CompareLambda_takahashi(); //lambdaを出す二つの方法で違いが出ないかチェック
   
   std::cout << "\n**border**\n" << std::endl;
 
@@ -908,6 +997,7 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   //ReadFileでfileから取得→Rebinまでやってる
   ana->SetkMaxPE(Iteration_MaxPE);
   ana->Analyze(1);
+  ana->CompareLambda_ishida();
   
   std::cout << "\n**border**\n" << std::endl;
 
@@ -919,6 +1009,7 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   ana2->MakeMCSpectra(ana->GetNoiseH1(), ana->GetOnePEDist(), ana->GetLambda(5), ana->GetSignalH1()->GetEntries(), false);
   ana2->SetkMaxPE(Iteration_MaxPE);
   ana2->Analyze(1);
+  ana2->CompareLambda_ishida();
 
   std::cout << "\nanaのLambda比較 fLamb : cLamb "<<std::endl;
   std::cout << ana->GetfLambda() << " ± " << ana->GetfLambdaErr() << "\t" << ana->GetLambda_C() << " ± " << ana->GetLambda_CErr() << std::endl;
@@ -932,11 +1023,23 @@ std::pair<std::shared_ptr<SinglePEAnalyzer>, std::shared_ptr<SinglePEAnalyzer>> 
   std::cout << "ana1 1PE dist Entry:" << ana->GetOnePEDist()->Integral(1,-1) << std::endl;
   std::cout << "ana1 1PE dist Mean :" << ana->GetOnePEDist()->GetMean() <<" ± " << ana->GetOnePEDist()->GetMeanError() << std::endl;
   std::cout << "ana1 1PE dist StdDv:" << ana->GetOnePEDist()->GetStdDev() <<" ± " << ana->GetOnePEDist()->GetStdDevError() << std::endl;
+  ana->PrintAllLambdas();
   std::cout << "ana2 1PE dist Entry:" << ana2->GetOnePEDist()->Integral(1,-1) << std::endl;
   std::cout << "ana2 1PE dist Mean :" << ana2->GetOnePEDist()->GetMean() <<" ± " << ana2->GetOnePEDist()->GetMeanError() << std::endl;
   std::cout << "ana2 1PE dist StdDv:" << ana2->GetOnePEDist()->GetStdDev() <<" ± " << ana2->GetOnePEDist()->GetStdDevError() << std::endl;
+  ana2->PrintAllLambdas();
   SaveData_MH(ana,ana2,file_name); 
   two_analyzer_compare(ana,ana2);
+  
+  TCanvas *SuminusCan= new TCanvas("SuminusCan","SuminusCan(Draw f0PEDist)", 1500, 600);
+  SuminusCan->Divide(4, 2, 0.01, 0.01);
+  for (int i = 0; i <= 5; ++i) {
+    SuminusCan->cd(i+1);
+    ana->GetNoiseH1()->Draw("same");
+    ana->Getf0PEDist(i)->SetLineColor(7); //lightblue
+    ana->Getf0PEDist(i)->Draw("same");
+  }
+
   return std::make_pair(ana, ana2);
 
   //欲しい情報
@@ -1049,7 +1152,7 @@ void test_HV() {
 }
 
 void two_analyzer_compare(std::shared_ptr<SinglePEAnalyzer> ana1, std::shared_ptr<SinglePEAnalyzer> ana2) {
-  std::cout << "aho" << typeid(ana1).name() <<  typeid(ana2).name() << std::endl;
+  std::cout << "name: " << typeid(ana1).name() <<  typeid(ana2).name() << std::endl;
   TCanvas *comp_can = new TCanvas("comp_can","comp_can", 1500, 600);
   comp_can->Divide(3, 1, 0.01, 0.01);
   comp_can->cd(1); 
@@ -1074,4 +1177,11 @@ void two_analyzer_compare(std::shared_ptr<SinglePEAnalyzer> ana1, std::shared_pt
   fSignal_compare->Draw("same");
   SinglePE_compare->Draw("same");
 
+  if (ana1->GetSimOnePEDist() != nullptr) {
+    comp_can->cd(1);
+    ana1->GetSimOnePEDist()->Draw("same");
+    comp_can->cd(2);
+    ana1->GetSimOnePEDist()->Draw("same");
+    std::cout << "Sim OnePEdist has been drawn" << std::endl;
+  }
 }
