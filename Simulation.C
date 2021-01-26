@@ -28,10 +28,22 @@ Width= 0.8;
 #include <fstream> //ファイル入出力
 #include <TRandom.h>
 
-void MakeNoiseDist(TH1D *noise) {
-    for (int i=0; i<39990; ++i) {
-        double x =gRandom->Gaus(0.0,5);
-        noise->Fill(x);
+void MakeNoiseDist(TH1D *noise, int noise_lambda = 0) {
+    if (noise_lambda == 0) {
+        for (int i=0; i<39990; ++i) {
+            double x =gRandom->Gaus(0.0,5);
+            noise->Fill(x);
+            }
+    } else {
+        for (int i=0; i<39990; ++i) {
+            double x = gRandom->Gaus(0.0,5);
+            int npe = gRandom->Poisson(0.1*noise_lambda);
+            for (int j=0; j<npe; ++j) {
+                double noisecharge = gRandom->Gaus(15,5);
+                (noisecharge > 0) ? x += noisecharge : x -= noisecharge;
+            }
+            noise->Fill(x);
+        }
     }
 }
 
@@ -79,8 +91,9 @@ void Simulation() {
     double N_entries = 39990;
     double lambda = 1.0;
     int AmpGain = 15;
+    int noise_lambda = 1;
     TH1D *noise= new TH1D("noise", "", nbins, xmin, xmax);  
-    MakeNoiseDist(noise);
+    MakeNoiseDist(noise,noise_lambda);
     TH1D *OnePE= new TH1D("OnePE", "", nbins, xmin, xmax); 
     OnePE->SetLineColor(6);
     MakeOnePEDist(OnePE,AmpGain);
@@ -100,8 +113,10 @@ void Simulation() {
     std::string nameH = "Sim/";
     std::string nameB = "normal_gain";
     std::string nameC = std::to_string(AmpGain);
+    std::string nameD = "_Noise";
+    std::string nameE = std::to_string(noise_lambda);
     std::string nameF = ".root";
-    std::string fname = nameH + nameB + nameC + nameF;
+    std::string fname = nameH + nameB + nameC + nameD + nameE + nameF;
     std::cout << fname << std::endl; 
     TFile *fout = new TFile(fname.c_str(), "recreate");
     std::cout << "Noise Mean = " << noise->GetMean() << " ± " << noise->GetMeanError() <<std::endl ;
